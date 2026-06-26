@@ -1,5 +1,9 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { test } = require('node:test');
+
+const STUB_MESSAGE = 'HustleOps API execution is not active in this metadata-first version.';
 
 test('HustleOps API credentials expose base URL and API key fields', () => {
 	const { HustleOpsApi } = require('../dist/credentials/HustleOpsApi.credentials.js');
@@ -40,6 +44,20 @@ function getProperty(description, name) {
 	const property = description.properties.find((candidate) => candidate.name === name);
 	assert.ok(property, `Expected property ${name} to exist`);
 	return property;
+}
+
+async function executeNode(parametersByItem) {
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+
+	return node.execute.call({
+		getInputData: () => parametersByItem.map((_, index) => ({ json: { item: index } })),
+		getNode: () => ({ name: 'HustleOps', type: 'hustleOps' }),
+		getNodeParameter: (name, itemIndex, defaultValue) => {
+			const value = parametersByItem[itemIndex][name];
+			return value === undefined ? defaultValue : value;
+		},
+	});
 }
 
 test('HustleOps node exposes the incident-response resources', () => {
@@ -96,4 +114,132 @@ test('HustleOps node codex metadata is present', () => {
 	assert.equal(codex.codexVersion, '1.0');
 	assert.equal(codex.categories.includes('Development'), true);
 	assert.equal(codex.categories.includes('Security'), true);
+});
+
+test('HustleOps create execution returns explicit redacted stub data', async () => {
+	const result = await executeNode([
+		{
+			resource: 'incident',
+			operation: 'create',
+			body: JSON.stringify({
+				title: 'Test incident',
+				apiKey: 'secret-key',
+				note: 'Authorization: Bearer secret-token',
+				nested: { token: 'secret-token' },
+				observables: [{ value: '1.2.3.4', password: 'secret-password' }],
+			}),
+		},
+	]);
+
+	assert.equal(result.length, 1);
+	assert.equal(result[0].length, 1);
+	assert.equal(result[0][0].json.message, STUB_MESSAGE);
+	assert.equal(result[0][0].json.resource, 'incident');
+	assert.equal(result[0][0].json.operation, 'create');
+	assert.deepEqual(result[0][0].json.parameters.body, {
+		title: 'Test incident',
+		apiKey: '[redacted]',
+		note: '[redacted]',
+		nested: { token: '[redacted]' },
+		observables: [{ value: '1.2.3.4', password: '[redacted]' }],
+	});
+	assert.deepEqual(result[0][0].pairedItem, { item: 0 });
+});
+
+test('HustleOps get, update, and list executions include operation-specific parameters', async () => {
+	const result = await executeNode([
+		{ resource: 'alert', operation: 'get', id: 'alert-123' },
+		{
+			resource: 'incident',
+			operation: 'update',
+			id: 'incident-456',
+			body: '{"status":"contained","secret":"case-secret"}',
+		},
+		{
+			resource: 'observable',
+			operation: 'list',
+			filters: '{"type":"ip","authorization":"Bearer secret"}',
+		},
+	]);
+
+	assert.equal(result[0].length, 3);
+	assert.deepEqual(result[0][0].json.parameters, { id: '[provided]' });
+	assert.deepEqual(result[0][1].json.parameters, {
+		id: '[provided]',
+		body: { status: 'contained', secret: '[redacted]' },
+	});
+	assert.deepEqual(result[0][2].json.parameters, {
+		filters: { type: 'ip', authorization: '[redacted]' },
+	});
+});
+
+test('HustleOps node reports invalid JSON with field-specific errors', async () => {
+	await assert.rejects(
+		executeNode([{ resource: 'incident', operation: 'create', body: '{"title":' }]),
+		/Body must be valid JSON/,
+	);
+
+	await assert.rejects(
+		executeNode([{ resource: 'observable', operation: 'list', filters: '{"type":' }]),
+		/Filters must be valid JSON/,
+	);
+});
+
+test('HustleOps node rejects empty create and update bodies', async () => {
+	await assert.rejects(
+		executeNode([{ resource: 'incident', operation: 'create', body: '' }]),
+		/Body is required for Create and Update/,
+	);
+
+	await assert.rejects(
+		executeNode([{ resource: 'incident', operation: 'update', id: 'incident-456', body: '' }]),
+		/Body is required for Create and Update/,
+	);
+});
+
+test('HustleOps stub output bounds large parameter previews', async () => {
+	const result = await executeNode([
+		{
+			resource: 'observable',
+			operation: 'list',
+			filters: JSON.stringify({
+				values: Array.from({ length: 25 }, (_, index) => `value-${index}`),
+				nested: { note: 'token=super-secret' },
+			}),
+		},
+	]);
+
+	assert.equal(result[0][0].json.parameters.filters.values.truncated, true);
+	assert.equal(result[0][0].json.parameters.filters.values.omittedItems, 5);
+	assert.equal(result[0][0].json.parameters.filters.nested.note, '[redacted]');
+});
+
+test('HustleOps node source does not call network helpers', () => {
+	const source = fs.readFileSync(
+		path.join(__dirname, '..', 'nodes', 'HustleOps', 'HustleOps.node.ts'),
+		'utf8',
+	);
+
+	const forbiddenPatterns = [
+		/httpRequest/,
+		/requestWithAuthentication/,
+		/this\.helpers\.request/,
+		/fetch\(/,
+		/axios/,
+		/got\(/,
+		/undici/,
+		/node:http/,
+		/node:https/,
+		/node:net/,
+		/node:tls/,
+		/node:dns/,
+		/XMLHttpRequest/,
+		/WebSocket/,
+	];
+
+	for (const pattern of forbiddenPatterns) {
+		assert.equal(pattern.test(source), false, `Unexpected network surface: ${pattern}`);
+	}
+
+	assert.equal(/from ['"](?!n8n-workflow)/.test(source), false);
 });
