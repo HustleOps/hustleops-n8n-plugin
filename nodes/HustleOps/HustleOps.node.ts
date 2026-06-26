@@ -18,22 +18,22 @@ const RESOURCE_OPTIONS: INodePropertyOptions[] = [
 	{
 		name: 'Alert',
 		value: 'alert',
-		description: 'Alert objects produced by detections or monitoring systems.',
+		description: 'Alert objects produced by detections or monitoring systems',
 	},
 	{
 		name: 'Incident',
 		value: 'incident',
-		description: 'Incident objects used for response coordination.',
+		description: 'Incident objects used for response coordination',
 	},
 	{
 		name: 'Observable',
 		value: 'observable',
-		description: 'Observable security artifacts such as IPs, domains, hashes, or URLs.',
+		description: 'Observable security artifacts such as IPs, domains, hashes, or URLs',
 	},
 	{
 		name: 'Knowledge',
 		value: 'knowledge',
-		description: 'Knowledge base or response knowledge objects.',
+		description: 'Knowledge base or response knowledge objects',
 	},
 ];
 
@@ -41,25 +41,25 @@ const OPERATION_OPTIONS: INodePropertyOptions[] = [
 	{
 		name: 'Create',
 		value: 'create',
-		description: 'Create a HustleOps object.',
+		description: 'Create a HustleOps object',
 		action: 'Create a HustleOps object',
 	},
 	{
 		name: 'Update',
 		value: 'update',
-		description: 'Update a HustleOps object.',
+		description: 'Update a HustleOps object',
 		action: 'Update a HustleOps object',
 	},
 	{
 		name: 'Get',
 		value: 'get',
-		description: 'Get a HustleOps object by ID.',
+		description: 'Get a HustleOps object by ID',
 		action: 'Get a HustleOps object',
 	},
 	{
 		name: 'List',
 		value: 'list',
-		description: 'List HustleOps objects.',
+		description: 'List HustleOps objects',
 		action: 'List HustleOps objects',
 	},
 ];
@@ -198,6 +198,7 @@ export class HustleOps implements INodeType {
 			{
 				name: 'hustleOpsApi',
 				required: true,
+				testedBy: 'hustleOps',
 			},
 		],
 		properties: [
@@ -231,7 +232,7 @@ export class HustleOps implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				description: 'HustleOps object ID.',
+				description: 'HustleOps object ID',
 				displayOptions: {
 					show: {
 						operation: OPERATIONS_WITH_ID,
@@ -245,7 +246,7 @@ export class HustleOps implements INodeType {
 				default: '',
 				placeholder: '{"title":"Suspicious login","severity":"high"}',
 				required: true,
-				description: 'JSON body to send in a future HustleOps create or update request.',
+				description: 'JSON body to send in a future HustleOps create or update request',
 				displayOptions: {
 					show: {
 						operation: OPERATIONS_WITH_BODY,
@@ -257,8 +258,7 @@ export class HustleOps implements INodeType {
 				name: 'filters',
 				type: 'json',
 				default: '{}',
-				required: false,
-				description: 'Optional JSON filters for a future HustleOps list request.',
+				description: 'Optional JSON filters for a future HustleOps list request',
 				displayOptions: {
 					show: {
 						operation: OPERATIONS_WITH_FILTERS,
@@ -273,50 +273,75 @@ export class HustleOps implements INodeType {
 		const returnData: INodeExecutionData[] = [];
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
-			const resource = this.getNodeParameter('resource', itemIndex) as HustleOpsResource;
-			const operation = this.getNodeParameter('operation', itemIndex) as HustleOpsOperation;
-			const parameters: IDataObject = {};
+			try {
+				const resource = this.getNodeParameter('resource', itemIndex) as HustleOpsResource;
+				const operation = this.getNodeParameter('operation', itemIndex) as HustleOpsOperation;
+				const parameters: IDataObject = {};
 
-			if (OPERATIONS_WITH_ID.includes(operation)) {
-				const id = this.getNodeParameter('id', itemIndex) as string;
-				if (id === '') {
-					throw new NodeOperationError(
-						this.getNode(),
-						'ID is required. HustleOps API execution was not attempted.',
-						{ itemIndex },
+				if (OPERATIONS_WITH_ID.includes(operation)) {
+					const id = this.getNodeParameter('id', itemIndex) as string;
+					if (id === '') {
+						throw new NodeOperationError(
+							this.getNode(),
+							'ID is required. HustleOps API execution was not attempted.',
+							{ itemIndex },
+						);
+					}
+					parameters.id = PROVIDED_VALUE;
+				}
+
+				if (OPERATIONS_WITH_BODY.includes(operation)) {
+					parameters.body = createParameterPreview(
+						parseJsonParameter(this, this.getNodeParameter('body', itemIndex), 'Body', itemIndex),
 					);
 				}
-				parameters.id = PROVIDED_VALUE;
-			}
 
-			if (OPERATIONS_WITH_BODY.includes(operation)) {
-				parameters.body = createParameterPreview(
-					parseJsonParameter(this, this.getNodeParameter('body', itemIndex), 'Body', itemIndex),
-				);
-			}
+				if (OPERATIONS_WITH_FILTERS.includes(operation)) {
+					parameters.filters = createParameterPreview(
+						parseJsonParameter(
+							this,
+							this.getNodeParameter('filters', itemIndex, '{}'),
+							'Filters',
+							itemIndex,
+						),
+					);
+				}
 
-			if (OPERATIONS_WITH_FILTERS.includes(operation)) {
-				parameters.filters = createParameterPreview(
-					parseJsonParameter(
-						this,
-						this.getNodeParameter('filters', itemIndex, '{}'),
-						'Filters',
-						itemIndex,
-					),
-				);
-			}
+				returnData.push({
+					json: {
+						message: STUB_MESSAGE,
+						resource,
+						operation,
+						parameters,
+					},
+					pairedItem: {
+						item: itemIndex,
+					},
+				});
+			} catch (error) {
+				const nodeError =
+					error instanceof NodeOperationError
+						? error
+						: new NodeOperationError(
+								this.getNode(),
+								error instanceof Error ? error.message : String(error),
+								{ itemIndex },
+							);
 
-			returnData.push({
-				json: {
-					message: STUB_MESSAGE,
-					resource,
-					operation,
-					parameters,
-				},
-				pairedItem: {
-					item: itemIndex,
-				},
-			});
+				if (!this.continueOnFail()) {
+					throw nodeError;
+				}
+
+				returnData.push({
+					json: {
+						error: nodeError.message,
+						message: STUB_MESSAGE,
+					},
+					pairedItem: {
+						item: itemIndex,
+					},
+				});
+			}
 		}
 
 		return [returnData];

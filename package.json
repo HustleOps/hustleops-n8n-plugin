@@ -3,7 +3,11 @@
 	"version": "0.1.0",
 	"private": true,
 	"description": "n8n community node package for HustleOps incident response workflows.",
-	"license": "UNLICENSED",
+	"license": "MIT",
+	"author": {
+		"name": "Dmytro Kosiuk",
+		"email": "misterr.minister@gmail.com"
+	},
 	"homepage": "https://github.com/HustleOps/hustleops-n8n-plugin#readme",
 	"keywords": [
 		"n8n-community-node-package",
@@ -47,11 +51,5 @@
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
-	},
-	"overrides": {
-		"form-data": "4.0.6",
-		"lodash": "4.18.1",
-		"minimatch": "9.0.9",
-		"uuid": "11.1.1"
 	}
 }

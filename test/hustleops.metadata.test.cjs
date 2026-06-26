@@ -11,6 +11,10 @@ test('HustleOps API credentials expose base URL and API key fields', () => {
 
 	assert.equal(credentials.name, 'hustleOpsApi');
 	assert.equal(credentials.displayName, 'HustleOps API');
+	assert.deepEqual(credentials.icon, {
+		light: 'file:../nodes/HustleOps/hustleops.svg',
+		dark: 'file:../nodes/HustleOps/hustleops.dark.svg',
+	});
 
 	const baseUrl = credentials.properties.find((property) => property.name === 'baseUrl');
 	const apiKey = credentials.properties.find((property) => property.name === 'apiKey');
@@ -57,6 +61,7 @@ async function executeNode(parametersByItem) {
 			const value = parametersByItem[itemIndex][name];
 			return value === undefined ? defaultValue : value;
 		},
+		continueOnFail: () => false,
 	});
 }
 
@@ -66,6 +71,9 @@ test('HustleOps node exposes the incident-response resources', () => {
 
 	assert.equal(description.displayName, 'HustleOps');
 	assert.equal(description.name, 'hustleOps');
+	assert.deepEqual(description.credentials, [
+		{ name: 'hustleOpsApi', required: true, testedBy: 'hustleOps' },
+	]);
 	assert.deepEqual(
 		resource.options.map((option) => option.value),
 		['alert', 'incident', 'observable', 'knowledge'],
@@ -249,7 +257,11 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 
 	assert.equal(packageJson.name, '@hustleops/n8n-nodes-hustleops');
 	assert.equal(packageJson.private, true);
-	assert.equal(packageJson.license, 'UNLICENSED');
+	assert.equal(packageJson.license, 'MIT');
+	assert.deepEqual(packageJson.author, {
+		name: 'Dmytro Kosiuk',
+		email: 'misterr.minister@gmail.com',
+	});
 	assert.equal(packageJson.keywords.includes('n8n-community-node-package'), true);
 	assert.equal(packageJson.n8n.n8nNodesApiVersion, 1);
 	assert.equal(packageJson.n8n.strict, true);
@@ -261,10 +273,9 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 	assert.equal(packageJson.scripts.prepublishOnly, undefined);
 	assert.equal(packageJson.devDependencies['@n8n/node-cli'], '0.36.1');
 	assert.equal(packageJson.devDependencies['release-it'], undefined);
+	assert.equal(packageJson.overrides, undefined);
 	assert.equal(packageJson.peerDependencies['n8n-workflow'], '*');
-	assert.deepEqual(packageJson.n8n.credentials, [
-		'dist/credentials/HustleOpsApi.credentials.js',
-	]);
+	assert.deepEqual(packageJson.n8n.credentials, ['dist/credentials/HustleOpsApi.credentials.js']);
 	assert.deepEqual(packageJson.n8n.nodes, ['dist/nodes/HustleOps/HustleOps.node.js']);
 	assert.equal(
 		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml')),

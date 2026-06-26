@@ -5,6 +5,11 @@ export class HustleOpsApi implements ICredentialType {
 
 	displayName = 'HustleOps API';
 
+	icon = {
+		light: 'file:../nodes/HustleOps/hustleops.svg',
+		dark: 'file:../nodes/HustleOps/hustleops.dark.svg',
+	} as const;
+
 	documentationUrl = 'https://hustleops.io/docs';
 
 	properties: INodeProperties[] = [

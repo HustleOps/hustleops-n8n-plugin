@@ -15,16 +15,11 @@
 		"preserveConstEnums": true,
 		"esModuleInterop": true,
 		"resolveJsonModule": true,
-		"incremental": true,
+		"incremental": false,
 		"declaration": true,
 		"sourceMap": false,
 		"skipLibCheck": true,
 		"outDir": "./dist/"
 	},
-	"include": [
-		"credentials/**/*.ts",
-		"nodes/**/*",
-		"nodes/**/*.json",
-		"package.json"
-	]
+	"include": ["credentials/**/*.ts", "nodes/**/*", "nodes/**/*.json", "package.json"]
 }
