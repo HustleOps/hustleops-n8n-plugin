@@ -243,3 +243,46 @@ test('HustleOps node source does not call network helpers', () => {
 
 	assert.equal(/from ['"](?!n8n-workflow)/.test(source), false);
 });
+
+test('package.json registers the compiled HustleOps node and credentials', () => {
+	const packageJson = require('../package.json');
+
+	assert.equal(packageJson.name, '@hustleops/n8n-nodes-hustleops');
+	assert.equal(packageJson.private, true);
+	assert.equal(packageJson.license, 'UNLICENSED');
+	assert.equal(packageJson.keywords.includes('n8n-community-node-package'), true);
+	assert.equal(packageJson.n8n.n8nNodesApiVersion, 1);
+	assert.equal(packageJson.n8n.strict, true);
+	assert.equal(packageJson.scripts.build, 'n8n-node build');
+	assert.equal(packageJson.scripts.dev, 'n8n-node dev');
+	assert.equal(packageJson.scripts.format, 'prettier --write .');
+	assert.equal(packageJson.scripts['test:unit'], 'node --test test/*.test.cjs');
+	assert.equal(packageJson.scripts.release, undefined);
+	assert.equal(packageJson.scripts.prepublishOnly, undefined);
+	assert.equal(packageJson.devDependencies['@n8n/node-cli'], '0.36.1');
+	assert.equal(packageJson.devDependencies['release-it'], undefined);
+	assert.equal(packageJson.peerDependencies['n8n-workflow'], '*');
+	assert.deepEqual(packageJson.n8n.credentials, [
+		'dist/credentials/HustleOpsApi.credentials.js',
+	]);
+	assert.deepEqual(packageJson.n8n.nodes, ['dist/nodes/HustleOps/HustleOps.node.js']);
+	assert.equal(
+		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml')),
+		false,
+	);
+});
+
+test('README states that real HustleOps API calls are not active in this version', () => {
+	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+
+	assert.match(readme, /metadata-first/i);
+	assert.match(readme, /does not call the HustleOps API/i);
+	assert.match(readme, /Base URL/i);
+	assert.match(readme, /HTTPS/i);
+	assert.match(readme, /API Key/i);
+	assert.match(readme, /npm run dev/i);
+	assert.match(readme, /redacted/i);
+	assert.match(readme, /not published/i);
+	assert.match(readme, /local review/i);
+	assert.match(readme, /does not validate or send/i);
+});

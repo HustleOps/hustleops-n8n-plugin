@@ -1,46 +1,88 @@
-# n8n-nodes-hustleops
+# HustleOps n8n Community Node
 
-This is an n8n community node. It lets you use _app/service name_ in your n8n workflows.
+This package provides a metadata-first n8n community node for HustleOps, an incident response platform for alerts, incidents, observables, and knowledge workflows.
 
-_App/service name_ is _one or two sentences describing the service this node integrates with_.
+This version defines the package shell, credentials, node resources, and operation metadata. It does not call the HustleOps API yet.
 
-[n8n](https://n8n.io/) is a [fair-code licensed](https://docs.n8n.io/sustainable-use-license/) workflow automation platform.
+## Current Status
 
-[Installation](#installation)
-[Operations](#operations)
-[Credentials](#credentials)
-[Compatibility](#compatibility)
-[Usage](#usage)
-[Resources](#resources)
-[Version history](#version-history)
+- Package metadata for an n8n community node.
+- `HustleOps API` credentials with a user-entered `Base URL` and secret `API Key`.
+- One `HustleOps` action node.
+- Resources: `Alert`, `Incident`, `Observable`, and `Knowledge`.
+- Operations: `Create`, `Update`, `Get`, and `List`.
+- Explicit stub execution that returns the selected resource, operation, and a bounded, redacted parameter preview.
+- In-node notice text explaining that this version is metadata-first and stub-only.
 
-## Installation
+## Local Review Status
 
-Follow the [installation guide](https://docs.n8n.io/integrations/community-nodes/installation/) in the n8n community nodes documentation.
+This metadata-first package is not published to npm yet. Use `npm run dev` for local review in n8n.
 
-## Operations
+Credentials are required in the node to mirror the future live API behavior, but stub execution does not validate or send the `Base URL` or `API Key`.
 
-_List the operations supported by your node._
+## Authentication
 
-## Credentials
+Create a `HustleOps API` credential in n8n with:
 
-_If users need to authenticate with the app/service, provide details here. You should include prerequisites (such as signing up with the service), available authentication methods, and how to set them up._
+- `Base URL`: the full HTTPS URL of your HustleOps instance. Use HTTP only for local development.
+- `API Key`: your HustleOps API key.
 
-## Compatibility
+Future API requests are expected to send:
 
-_State the minimum n8n version, as well as which versions you test against. You can also include any known version incompatibility issues._
+```text
+Authorization: Bearer <apiKey>
+```
 
-## Usage
+If HustleOps uses a different header format, update the credential and request helper design before enabling live API calls.
 
-_This is an optional section. Use it to help users with any difficult or confusing aspects of the node._
+## Development
 
-_By the time users are looking for community nodes, they probably already know n8n basics. But if you expect new users, you can link to the [Try it out](https://docs.n8n.io/try-it-out/) documentation to help them get started._
+Install dependencies:
 
-## Resources
+```bash
+npm install
+```
 
-* [n8n community nodes documentation](https://docs.n8n.io/integrations/#community-nodes)
-* _Link to app/service documentation._
+Build:
 
-## Version history
+```bash
+npm run build
+```
 
-_This is another optional section. If your node has multiple versions, include a short description of available versions and what changed, as well as any compatibility impact._
+Run tests:
+
+```bash
+npm test
+```
+
+Run unit tests without rebuilding:
+
+```bash
+npm run test:unit
+```
+
+Run lint:
+
+```bash
+npm run lint
+```
+
+Format:
+
+```bash
+npm run format
+```
+
+Start a local n8n development instance with this node loaded:
+
+```bash
+npm run dev
+```
+
+Open the local n8n URL from the command output, add the HustleOps node to a workflow, and execute the default `List` operation without a payload. The execution output should contain the selected resource and operation, plus a bounded, redacted parameter preview. Secret-like keys such as `apiKey`, `token`, `secret`, `password`, `authorization`, and `bearer`, plus high-confidence credential strings, are redacted in stub output.
+
+## Limitations
+
+This metadata-first version does not call the HustleOps API, does not validate HustleOps object schemas, and does not include trigger nodes or webhooks.
+
+Before live HustleOps API calls are enabled, request helpers must validate the Base URL with `URL`, reject embedded credentials, reject query strings and fragments, normalize trailing slashes, and require HTTPS except for local development.
