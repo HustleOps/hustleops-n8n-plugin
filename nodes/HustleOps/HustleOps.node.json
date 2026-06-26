@@ -1,0 +1,18 @@
+{
+	"node": "@hustleops/n8n-nodes-hustleops",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Development", "Security"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/HustleOps/hustleops-n8n-plugin#authentication"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/HustleOps/hustleops-n8n-plugin#readme"
+			}
+		]
+	}
+}
