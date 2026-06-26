@@ -1,0 +1,30 @@
+{
+	"compilerOptions": {
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"target": "es2019",
+		"lib": ["es2019", "es2020", "es2022.error"],
+		"removeComments": true,
+		"strict": true,
+		"useUnknownInCatchVariables": false,
+		"forceConsistentCasingInFileNames": true,
+		"noImplicitAny": true,
+		"noImplicitReturns": true,
+		"noUnusedLocals": true,
+		"strictNullChecks": true,
+		"preserveConstEnums": true,
+		"esModuleInterop": true,
+		"resolveJsonModule": true,
+		"incremental": true,
+		"declaration": true,
+		"sourceMap": false,
+		"skipLibCheck": true,
+		"outDir": "./dist/"
+	},
+	"include": [
+		"credentials/**/*.ts",
+		"nodes/**/*",
+		"nodes/**/*.json",
+		"package.json"
+	]
+}
