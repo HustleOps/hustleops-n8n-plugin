@@ -109,7 +109,9 @@ test('HustleOps node exposes live request fields', () => {
 	const maxItems = getProperty(description, 'maxItems');
 	const maxPages = getProperty(description, 'maxPages');
 	const includePaginationMetadata = getProperty(description, 'includePaginationMetadata');
-	const notice = description.properties.find((candidate) => candidate.name === 'metadataFirstNotice');
+	const notice = description.properties.find(
+		(candidate) => candidate.name === 'metadataFirstNotice',
+	);
 
 	assert.equal(notice, undefined);
 

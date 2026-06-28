@@ -3,6 +3,7 @@ import type {
 	ICredentialTestFunctions,
 	IDataObject,
 	IExecuteFunctions,
+	INode,
 } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { HUSTLEOPS_API_KEY_HEADER } from './constants';
@@ -44,8 +45,15 @@ export type PaginatedResponse = {
 
 export const MAX_JSON_PARAMETER_CHARS = 100_000;
 const MAX_ERROR_MESSAGE_CHARS = 1000;
-const UUID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const HELPER_NODE: INode = {
+	id: 'hustleops-helper',
+	name: 'HustleOps',
+	type: 'hustleOps',
+	typeVersion: 1,
+	position: [0, 0],
+	parameters: {},
+};
 
 function isLocalHttpHost(hostname: string): boolean {
 	return (
@@ -67,7 +75,7 @@ export function normalizeBaseUrl(input: string): string {
 	try {
 		url = new URL(trimmed);
 	} catch {
-		throw new Error('Base URL must be a valid URL.');
+		throw new NodeOperationError(HELPER_NODE, 'Base URL must be a valid URL.');
 	}
 
 	if (url.protocol !== 'https:' && url.protocol !== 'http:') {
@@ -106,9 +114,7 @@ export function safePathSegment(value: string, label: string): string {
 
 export function compactObject<T>(value: T): T {
 	if (Array.isArray(value)) {
-		return value
-			.filter((item) => item !== undefined)
-			.map((item) => compactObject(item)) as T;
+		return value.filter((item) => item !== undefined).map((item) => compactObject(item)) as T;
 	}
 
 	if (value && typeof value === 'object') {
@@ -280,7 +286,7 @@ export async function testHustleOpsApiCredentials(
 			json: true,
 		});
 	} catch (error) {
-		throw new Error(formatApiError(error));
+		throw new NodeOperationError(HELPER_NODE, formatApiError(error));
 	}
 }
 

@@ -6,14 +6,14 @@ The current package supports live HustleOps API requests for core alert, inciden
 
 ## Supported Resources And Operations
 
-| Resource | Operations |
-| --- | --- |
-| Alert | Search, Count, Get, Create, Update |
-| Incident | Search, Count, Get, Create, Update |
+| Resource   | Operations                         |
+| ---------- | ---------------------------------- |
+| Alert      | Search, Count, Get, Create, Update |
+| Incident   | Search, Count, Get, Create, Update |
 | Observable | Search, Count, Get, Create, Update |
-| Knowledge | Search, Count, Get, Create, Update |
+| Knowledge  | Search, Count, Get, Create, Update |
 
-Search operations call HustleOps `/search` endpoints with a JSON Search Body. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
+Search operations call HustleOps `/search` endpoints with a JSON Search Body. Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
 
 Create and Update operations accept JSON bodies. Unsupported fields fail before a request is sent because the HustleOps API rejects unknown DTO fields.
 
@@ -48,14 +48,14 @@ Alert:
 
 ```json
 {
-  "name": "Suspicious login",
-  "description": "Okta anomaly",
-  "severity": "HIGH",
-  "tlp": "AMBER",
-  "source": "okta",
-  "type": "identity",
-  "sourceRef": "evt_12345",
-  "detectedAt": "2026-06-28T12:00:00.000Z"
+	"name": "Suspicious login",
+	"description": "Okta anomaly",
+	"severity": "HIGH",
+	"tlp": "AMBER",
+	"source": "okta",
+	"type": "identity",
+	"sourceRef": "evt_12345",
+	"detectedAt": "2026-06-28T12:00:00.000Z"
 }
 ```
 
@@ -63,11 +63,11 @@ Incident:
 
 ```json
 {
-  "name": "Credential theft investigation",
-  "description": "Coordinated response for suspicious Okta activity",
-  "severity": "HIGH",
-  "tlp": "AMBER",
-  "category": "identity"
+	"name": "Credential theft investigation",
+	"description": "Coordinated response for suspicious Okta activity",
+	"severity": "HIGH",
+	"tlp": "AMBER",
+	"category": "identity"
 }
 ```
 
@@ -75,12 +75,12 @@ Observable:
 
 ```json
 {
-  "value": "198.51.100.10",
-  "type": "ip",
-  "threatLevel": "SUSPICIOUS",
-  "tlp": "AMBER",
-  "firstSeen": "2026-06-28T11:30:00.000Z",
-  "lastSeen": "2026-06-28T12:00:00.000Z"
+	"value": "198.51.100.10",
+	"type": "ip",
+	"threatLevel": "SUSPICIOUS",
+	"tlp": "AMBER",
+	"firstSeen": "2026-06-28T11:30:00.000Z",
+	"lastSeen": "2026-06-28T12:00:00.000Z"
 }
 ```
 
@@ -88,10 +88,10 @@ Knowledge:
 
 ```json
 {
-  "value": "Containment runbook",
-  "type": "runbook",
-  "tlp": "AMBER",
-  "description": "Steps for disabling compromised accounts"
+	"value": "Containment runbook",
+	"type": "runbook",
+	"tlp": "AMBER",
+	"description": "Steps for disabling compromised accounts"
 }
 ```
 

@@ -1,4 +1,5 @@
-import type { IDataObject } from 'n8n-workflow';
+import type { IDataObject, INode } from 'n8n-workflow';
+import { NodeOperationError } from 'n8n-workflow';
 import { compactObject } from './GenericFunctions';
 
 export type CoreResource = 'alert' | 'incident' | 'observable' | 'knowledge';
@@ -49,8 +50,15 @@ const MAX_SEARCH_CONDITIONS = 50;
 const MAX_SEARCH_DEPTH = 4;
 const MAX_PAGE = 10000;
 const MAX_PAGE_SIZE = 100;
-const UUID_PATTERN =
-	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RESOURCE_DEFINITION_NODE: INode = {
+	id: 'hustleops-resource-definitions',
+	name: 'HustleOps',
+	type: 'hustleOps',
+	typeVersion: 1,
+	position: [0, 0],
+	parameters: {},
+};
 
 const alertSearchFields = [
 	'seq',
@@ -389,13 +397,21 @@ function validateDtoField(definition: CoreResourceDefinition, field: string, val
 		try {
 			new URL(value);
 		} catch {
-			throw new Error(`${definition.displayName} field ${field} must be a valid URL.`);
+			throw new NodeOperationError(
+				RESOURCE_DEFINITION_NODE,
+				`${definition.displayName} field ${field} must be a valid URL.`,
+			);
 		}
 	}
 	if (spec.type === 'enum' && spec.allowedValues && !spec.allowedValues.includes(value as string)) {
-		throw new Error(`${definition.displayName} field ${field} must be one of: ${spec.allowedValues.join(', ')}.`);
+		throw new Error(
+			`${definition.displayName} field ${field} must be one of: ${spec.allowedValues.join(', ')}.`,
+		);
 	}
-	if (spec.type === 'tags' && (!Array.isArray(value) || value.some((tag) => typeof tag !== 'string'))) {
+	if (
+		spec.type === 'tags' &&
+		(!Array.isArray(value) || value.some((tag) => typeof tag !== 'string'))
+	) {
 		throw new Error(`${definition.displayName} field ${field} must be an array of tag names.`);
 	}
 }
@@ -428,7 +444,9 @@ export function sanitizeDtoBody(
 	if (operation === 'create') {
 		assertRequiredCreateFields(definition, compacted);
 	} else if (Object.keys(compacted).length === 0) {
-		throw new Error(`${definition.displayName} update body must include at least one supported field.`);
+		throw new Error(
+			`${definition.displayName} update body must include at least one supported field.`,
+		);
 	}
 
 	for (const [field, value] of Object.entries(compacted)) {
@@ -455,7 +473,10 @@ function validateExcludeIds(definition: CoreResourceDefinition, value: unknown):
 	if (value === undefined) {
 		return;
 	}
-	if (!Array.isArray(value) || value.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))) {
+	if (
+		!Array.isArray(value) ||
+		value.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))
+	) {
 		throw new Error(`${definition.displayName} search excludeIds must contain valid UUIDs.`);
 	}
 }
@@ -477,7 +498,10 @@ function validateSearchFilter(
 	}
 
 	const objectValue = value as IDataObject;
-	if (objectValue.operator !== undefined && !SEARCH_GROUP_OPERATORS.has(objectValue.operator as string)) {
+	if (
+		objectValue.operator !== undefined &&
+		!SEARCH_GROUP_OPERATORS.has(objectValue.operator as string)
+	) {
 		throw new Error(`${definition.displayName} search filter operator must be AND or OR.`);
 	}
 
@@ -494,12 +518,16 @@ function validateSearchFilter(
 	}
 	state.groups += groups.length;
 	if (state.groups > MAX_SEARCH_GROUPS) {
-		throw new Error(`${definition.displayName} search filter cannot contain more than ${MAX_SEARCH_GROUPS} groups.`);
+		throw new Error(
+			`${definition.displayName} search filter cannot contain more than ${MAX_SEARCH_GROUPS} groups.`,
+		);
 	}
 
 	const conditions = Array.isArray(objectValue.conditions) ? objectValue.conditions : [];
 	if (depth > 0 && conditions.length === 0 && groups.length === 0) {
-		throw new Error(`${definition.displayName} search filter groups must contain at least one condition.`);
+		throw new Error(
+			`${definition.displayName} search filter groups must contain at least one condition.`,
+		);
 	}
 	state.conditions += conditions.length;
 	if (state.conditions > MAX_SEARCH_CONDITIONS) {
@@ -513,17 +541,26 @@ function validateSearchFilter(
 			throw new Error(`${definition.displayName} search condition must be an object.`);
 		}
 		const conditionObject = condition as IDataObject;
-		if (typeof conditionObject.field !== 'string' || !definition.searchFields.includes(conditionObject.field)) {
-			throw new Error(`Unsupported ${definition.displayName} search field: ${conditionObject.field}`);
+		if (
+			typeof conditionObject.field !== 'string' ||
+			!definition.searchFields.includes(conditionObject.field)
+		) {
+			throw new Error(
+				`Unsupported ${definition.displayName} search field: ${conditionObject.field}`,
+			);
 		}
 		if (!SEARCH_OPERATORS.has(conditionObject.operator as string)) {
-			throw new Error(`Unsupported ${definition.displayName} search operator: ${conditionObject.operator}`);
+			throw new Error(
+				`Unsupported ${definition.displayName} search operator: ${conditionObject.operator}`,
+			);
 		}
 		if (
 			(conditionObject.operator === 'in' || conditionObject.operator === 'notIn') &&
 			!Array.isArray(conditionObject.value)
 		) {
-			throw new Error(`${definition.displayName} search operator ${conditionObject.operator} requires an array value.`);
+			throw new Error(
+				`${definition.displayName} search operator ${conditionObject.operator} requires an array value.`,
+			);
 		}
 		if (
 			conditionObject.operator !== 'isNull' &&
@@ -541,11 +578,15 @@ function validateSearchFilter(
 	}
 }
 
-export function buildSearchRequest(definition: CoreResourceDefinition, input: IDataObject): IDataObject {
+export function buildSearchRequest(
+	definition: CoreResourceDefinition,
+	input: IDataObject,
+): IDataObject {
 	assertAllowedKeys(definition, 'search request', input, SEARCH_REQUEST_FIELDS);
 	const pagination = (input.pagination ?? {}) as IDataObject;
 	assertAllowedKeys(definition, 'search pagination', pagination, SEARCH_PAGINATION_FIELDS);
-	const sortBy = typeof pagination.sortBy === 'string' ? pagination.sortBy : definition.defaultSortBy;
+	const sortBy =
+		typeof pagination.sortBy === 'string' ? pagination.sortBy : definition.defaultSortBy;
 	const sortOrder =
 		pagination.sortOrder === 'asc' || pagination.sortOrder === 'desc'
 			? pagination.sortOrder
@@ -557,10 +598,14 @@ export function buildSearchRequest(definition: CoreResourceDefinition, input: ID
 	const page = typeof pagination.page === 'number' ? pagination.page : 1;
 	const pageSize = typeof pagination.pageSize === 'number' ? pagination.pageSize : 25;
 	if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {
-		throw new Error(`${definition.displayName} search pagination.page must be between 1 and ${MAX_PAGE}.`);
+		throw new Error(
+			`${definition.displayName} search pagination.page must be between 1 and ${MAX_PAGE}.`,
+		);
 	}
 	if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-		throw new Error(`${definition.displayName} search pagination.pageSize must be between 1 and ${MAX_PAGE_SIZE}.`);
+		throw new Error(
+			`${definition.displayName} search pagination.pageSize must be between 1 and ${MAX_PAGE_SIZE}.`,
+		);
 	}
 
 	validateSearchFilter(definition, input.filter);

@@ -150,7 +150,7 @@ export class HustleOps implements INodeType {
 				name: 'returnAll',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to fetch every search result page',
+				description: 'Whether to return all results or only up to a given limit',
 				displayOptions: {
 					show: {
 						operation: ['search'],

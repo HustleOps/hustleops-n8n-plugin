@@ -141,7 +141,10 @@ test('search posts a search request and returns one item per response row', asyn
 
 	assert.equal(calls[0].method, 'POST');
 	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/knowledge/search');
-	assert.deepEqual(result[0].map((item) => item.json), [{ id: 'knw-1' }, { id: 'knw-2' }]);
+	assert.deepEqual(
+		result[0].map((item) => item.json),
+		[{ id: 'knw-1' }, { id: 'knw-2' }],
+	);
 });
 
 test('search returnAll uses automatic pagination', async () => {
@@ -150,7 +153,8 @@ test('search returnAll uses automatic pagination', async () => {
 			{
 				resource: 'alert',
 				operation: 'search',
-				searchBody: '{"pagination":{"page":1,"pageSize":1,"sortBy":"detectedAt","sortOrder":"desc"}}',
+				searchBody:
+					'{"pagination":{"page":1,"pageSize":1,"sortBy":"detectedAt","sortOrder":"desc"}}',
 				returnAll: true,
 				maxItems: 2,
 				maxPages: 5,
@@ -165,8 +169,14 @@ test('search returnAll uses automatic pagination', async () => {
 		}),
 	);
 
-	assert.deepEqual(calls.map((call) => call.body.pagination.page), [1, 2]);
-	assert.deepEqual(result[0].map((item) => item.json), [{ id: 'alert-1' }, { id: 'alert-2' }]);
+	assert.deepEqual(
+		calls.map((call) => call.body.pagination.page),
+		[1, 2],
+	);
+	assert.deepEqual(
+		result[0].map((item) => item.json),
+		[{ id: 'alert-1' }, { id: 'alert-2' }],
+	);
 });
 
 test('search can return raw pagination metadata for one page', async () => {

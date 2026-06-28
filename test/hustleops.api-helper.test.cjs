@@ -8,7 +8,10 @@ function loadHelpers() {
 test('normalizeBaseUrl accepts HTTPS instance and API URLs', () => {
 	const { normalizeBaseUrl } = loadHelpers();
 
-	assert.equal(normalizeBaseUrl('https://hustleops.example.com'), 'https://hustleops.example.com/api/v1');
+	assert.equal(
+		normalizeBaseUrl('https://hustleops.example.com'),
+		'https://hustleops.example.com/api/v1',
+	);
 	assert.equal(
 		normalizeBaseUrl('https://hustleops.example.com/api/v1'),
 		'https://hustleops.example.com/api/v1',
@@ -28,7 +31,10 @@ test('normalizeBaseUrl permits localhost HTTP and rejects unsafe URLs', () => {
 
 	assert.throws(() => normalizeBaseUrl('ftp://hustleops.example.com'), /must use HTTP or HTTPS/);
 	assert.throws(() => normalizeBaseUrl('http://hustleops.example.com'), /HTTPS is required/);
-	assert.throws(() => normalizeBaseUrl('https://user:pass@hustleops.example.com'), /embedded credentials/);
+	assert.throws(
+		() => normalizeBaseUrl('https://user:pass@hustleops.example.com'),
+		/embedded credentials/,
+	);
 	assert.throws(() => normalizeBaseUrl('https://hustleops.example.com?x=1'), /query strings/);
 	assert.throws(() => normalizeBaseUrl('https://hustleops.example.com#fragment'), /fragments/);
 });
@@ -70,7 +76,13 @@ test('hustleOpsApiRequest sends x-api-key, JSON headers, normalized URL, and req
 		},
 	};
 
-	const result = await hustleOpsApiRequest(context, 'POST', '/alerts/search', { filter: undefined }, 0);
+	const result = await hustleOpsApiRequest(
+		context,
+		'POST',
+		'/alerts/search',
+		{ filter: undefined },
+		0,
+	);
 
 	assert.deepEqual(result, { ok: true });
 	assert.equal(calls.length, 1);
@@ -142,16 +154,13 @@ test('hustleOpsApiRequest redacts secrets from surfaced errors', async () => {
 		},
 	};
 
-	await assert.rejects(
-		hustleOpsApiRequest(context, 'GET', '/tags', undefined, 0),
-		(error) => {
-			assert.match(error.message, /HustleOps API error 401/);
-			assert.doesNotMatch(error.message, /fixture-api-key/);
-			assert.doesNotMatch(error.message, /Bearer\s+\S+/);
-			assert.doesNotMatch(error.message, /password=s3cr3t/);
-			return true;
-		},
-	);
+	await assert.rejects(hustleOpsApiRequest(context, 'GET', '/tags', undefined, 0), (error) => {
+		assert.match(error.message, /HustleOps API error 401/);
+		assert.doesNotMatch(error.message, /fixture-api-key/);
+		assert.doesNotMatch(error.message, /Bearer\s+\S+/);
+		assert.doesNotMatch(error.message, /password=s3cr3t/);
+		return true;
+	});
 });
 
 test('safePathSegment accepts UUIDs and rejects unsafe path segments', () => {
@@ -160,7 +169,10 @@ test('safePathSegment accepts UUIDs and rejects unsafe path segments', () => {
 
 	assert.equal(safePathSegment(id, 'Alert ID'), id);
 	assert.throws(() => safePathSegment('../users', 'Alert ID'), /Alert ID must be a valid UUID/);
-	assert.throws(() => safePathSegment('abc/linked-alerts', 'Alert ID'), /Alert ID must be a valid UUID/);
+	assert.throws(
+		() => safePathSegment('abc/linked-alerts', 'Alert ID'),
+		/Alert ID must be a valid UUID/,
+	);
 	assert.throws(() => safePathSegment('id?x=1', 'Alert ID'), /Alert ID must be a valid UUID/);
 });
 
@@ -240,8 +252,10 @@ test('core resource definitions expose API paths and default search sorts', () =
 });
 
 test('sanitizeDtoBody rejects unknown fields and strips undefined values', () => {
-	const { CORE_RESOURCE_DEFINITIONS, sanitizeDtoBody } =
-		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const {
+		CORE_RESOURCE_DEFINITIONS,
+		sanitizeDtoBody,
+	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
 
 	assert.deepEqual(
 		sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
@@ -268,7 +282,11 @@ test('sanitizeDtoBody rejects unknown fields and strips undefined values', () =>
 	);
 
 	assert.throws(
-		() => sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', { name: 'x', createdById: 'user-1' }),
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+				name: 'x',
+				createdById: 'user-1',
+			}),
 		/Unsupported Alert create field: createdById/,
 	);
 	assert.throws(
@@ -278,8 +296,10 @@ test('sanitizeDtoBody rejects unknown fields and strips undefined values', () =>
 });
 
 test('buildSearchRequest defaults pagination and validates sort fields', () => {
-	const { CORE_RESOURCE_DEFINITIONS, buildSearchRequest } =
-		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const {
+		CORE_RESOURCE_DEFINITIONS,
+		buildSearchRequest,
+	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
 
 	assert.deepEqual(buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {}), {
 		pagination: {
@@ -330,14 +350,19 @@ test('buildSearchRequest defaults pagination and validates sort fields', () => {
 	);
 
 	assert.throws(
-		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.knowledge, { pagination: { sortBy: 'severity' } }),
+		() =>
+			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.knowledge, {
+				pagination: { sortBy: 'severity' },
+			}),
 		/Unsupported Knowledge search sort field: severity/,
 	);
 });
 
 test('sanitizeDtoBody enforces required create fields and rejects empty updates', () => {
-	const { CORE_RESOURCE_DEFINITIONS, sanitizeDtoBody } =
-		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const {
+		CORE_RESOURCE_DEFINITIONS,
+		sanitizeDtoBody,
+	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
 
 	assert.throws(
 		() => sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', { name: 'x' }),
@@ -376,8 +401,10 @@ test('sanitizeDtoBody enforces required create fields and rejects empty updates'
 });
 
 test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and unsafe filter size', () => {
-	const { CORE_RESOURCE_DEFINITIONS, buildSearchRequest } =
-		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const {
+		CORE_RESOURCE_DEFINITIONS,
+		buildSearchRequest,
+	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
 
 	assert.throws(
 		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, { where: {} }),
