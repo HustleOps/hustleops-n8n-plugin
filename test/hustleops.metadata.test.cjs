@@ -180,19 +180,31 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 	);
 });
 
-test('README states that real HustleOps API calls are not active in this version', () => {
+test('README documents live HustleOps API core operations', () => {
 	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
 
-	assert.match(readme, /metadata-first/i);
-	assert.match(readme, /does not call the HustleOps API/i);
-	assert.match(readme, /Base URL/i);
-	assert.match(readme, /HTTPS/i);
-	assert.match(readme, /API Key/i);
-	assert.match(readme, /npm run dev/i);
-	assert.match(readme, /redacted/i);
-	assert.match(readme, /not published/i);
-	assert.match(readme, /local review/i);
-	assert.match(readme, /does not validate or send/i);
+	assert.match(readme, /live HustleOps API/i);
 	assert.match(readme, /x-api-key/i);
-	assert.doesNotMatch(readme, /Authorization: Bearer <apiKey>/);
+	assert.match(readme, /Search/i);
+	assert.match(readme, /Count/i);
+	assert.match(readme, /Get/i);
+	assert.match(readme, /Create/i);
+	assert.match(readme, /Update/i);
+	assert.match(readme, /Alert/i);
+	assert.match(readme, /Incident/i);
+	assert.match(readme, /Observable/i);
+	assert.match(readme, /Knowledge/i);
+	assert.match(readme, /Return All/i);
+	assert.match(readme, /Max Items/i);
+	assert.match(readme, /Include Pagination Metadata/i);
+	assert.match(readme, /unsupported fields/i);
+	assert.match(readme, /Getting an API key/i);
+	assert.match(readme, /API keys must be created outside n8n/i);
+	assert.match(readme, /Create examples/i);
+	assert.match(readme, /sourceRef/i);
+	assert.match(readme, /firstSeen/i);
+	assert.match(readme, /tlp/i);
+	assert.match(readme, /Comments and attachments are not included/i);
+	assert.doesNotMatch(readme, /metadata-first/i);
+	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
 });

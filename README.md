@@ -1,33 +1,38 @@
 # HustleOps n8n Community Node
 
-This package provides a metadata-first n8n community node for HustleOps, an incident response platform for alerts, incidents, observables, and knowledge workflows.
+This package provides an n8n community node for HustleOps incident response workflows.
 
-This version defines the package shell, credentials, node resources, and operation metadata. It does not call the HustleOps API yet.
+The current package supports live HustleOps API requests for core alert, incident, observable, and knowledge operations.
 
-## Current Status
+## Supported Resources And Operations
 
-- Package metadata for an n8n community node.
-- `HustleOps API` credentials with a user-entered `Base URL` and secret `API Key`.
-- One `HustleOps` action node.
-- Resources: `Alert`, `Incident`, `Observable`, and `Knowledge`.
-- Operations: `Create`, `Update`, `Get`, and `List`.
-- Explicit stub execution that returns the selected resource, operation, and a bounded, redacted parameter preview.
-- In-node notice text explaining that this version is metadata-first and stub-only.
+| Resource | Operations |
+| --- | --- |
+| Alert | Search, Count, Get, Create, Update |
+| Incident | Search, Count, Get, Create, Update |
+| Observable | Search, Count, Get, Create, Update |
+| Knowledge | Search, Count, Get, Create, Update |
 
-## Local Review Status
+Search operations call HustleOps `/search` endpoints with a JSON Search Body. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
 
-This metadata-first package is not published to npm yet. Use `npm run dev` for local review in n8n.
+Create and Update operations accept JSON bodies. Unsupported fields fail before a request is sent because the HustleOps API rejects unknown DTO fields.
 
-Credentials are required in the node to mirror the future live API behavior, but stub execution does not validate or send the `Base URL` or `API Key`.
+## Getting an API Key
+
+API keys must be created outside n8n by a HustleOps administrator or another user with access to API-key management.
+
+The n8n node does not create, rotate, or revoke HustleOps API keys.
+
+The API key owner needs the HustleOps permissions required by the operation being run, such as view permission for Search/Get and create or update permission for write operations.
 
 ## Authentication
 
 Create a `HustleOps API` credential in n8n with:
 
-- `Base URL`: the full HTTPS URL of your HustleOps instance. Use HTTP only for local development.
+- `Base URL`: the full HTTPS URL of your HustleOps instance. Use HTTP only for local development on `localhost`, `127.0.0.1`, or `::1`.
 - `API Key`: your HustleOps API key.
 
-Live HustleOps API requests send the API key as:
+Requests send:
 
 ```text
 x-api-key: ho_sk_...
@@ -35,7 +40,68 @@ Accept: application/json
 Content-Type: application/json
 ```
 
-The API key acts as the user who owns the key, so that user's HustleOps permissions still apply.
+API keys act as the user who owns the key, so role and permission checks still apply.
+
+## Create Examples
+
+Alert:
+
+```json
+{
+  "name": "Suspicious login",
+  "description": "Okta anomaly",
+  "severity": "HIGH",
+  "tlp": "AMBER",
+  "source": "okta",
+  "type": "identity",
+  "sourceRef": "evt_12345",
+  "detectedAt": "2026-06-28T12:00:00.000Z"
+}
+```
+
+Incident:
+
+```json
+{
+  "name": "Credential theft investigation",
+  "description": "Coordinated response for suspicious Okta activity",
+  "severity": "HIGH",
+  "tlp": "AMBER",
+  "category": "identity"
+}
+```
+
+Observable:
+
+```json
+{
+  "value": "198.51.100.10",
+  "type": "ip",
+  "threatLevel": "SUSPICIOUS",
+  "tlp": "AMBER",
+  "firstSeen": "2026-06-28T11:30:00.000Z",
+  "lastSeen": "2026-06-28T12:00:00.000Z"
+}
+```
+
+Knowledge:
+
+```json
+{
+  "value": "Containment runbook",
+  "type": "runbook",
+  "tlp": "AMBER",
+  "description": "Steps for disabling compromised accounts"
+}
+```
+
+## Search Pagination
+
+By default, Search returns one output item per row in the API response `data` array.
+
+Enable `Include Pagination Metadata` to return the raw page object with `data`, `total`, `page`, `pageSize`, and `totalPages`.
+
+Enable `Return All` to fetch multiple pages. `Max Items` and `Max Pages` bound the request so large result sets do not run indefinitely.
 
 ## Development
 
@@ -81,10 +147,10 @@ Start a local n8n development instance with this node loaded:
 npm run dev
 ```
 
-Open the local n8n URL from the command output, add the HustleOps node to a workflow, and execute the default `List` operation without a payload. The execution output should contain the selected resource and operation, plus a bounded, redacted parameter preview. Secret-like keys such as `apiKey`, `token`, `secret`, `password`, `authorization`, and `bearer`, plus high-confidence credential strings, are redacted in stub output.
-
 ## Limitations
 
-This metadata-first version does not call the HustleOps API, does not validate HustleOps object schemas, and does not include trigger nodes or webhooks.
+Comments and attachments are not included in this implementation slice.
 
-Before live HustleOps API calls are enabled, request helpers must validate the Base URL with `URL`, reject embedded credentials, reject query strings and fragments, normalize trailing slashes, and require HTTPS except for local development.
+Admin-only resources such as webhooks, users, teams, roles, system settings, and custom-field definitions are not included.
+
+The package is still private and is not published to npm.
