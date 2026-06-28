@@ -80,6 +80,19 @@ test('HustleOps node exposes the incident-response resources', () => {
 	);
 });
 
+test('HustleOps node provides the advertised metadata-first credential test', async () => {
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	const credentialTest = node.methods.credentialTest.hustleOps;
+
+	const result = await credentialTest.call({});
+
+	assert.deepEqual(result, {
+		status: 'OK',
+		message: 'Credentials accepted for metadata-first stub. HustleOps API was not contacted.',
+	});
+});
+
 test('HustleOps node exposes create, update, get, and list operations', () => {
 	const description = getNodeDescription();
 	const operation = getProperty(description, 'operation');

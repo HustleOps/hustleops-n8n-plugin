@@ -1,7 +1,9 @@
 import type {
 	GenericValue,
 	IDataObject,
+	ICredentialTestFunctions,
 	IExecuteFunctions,
+	INodeCredentialTestResult,
 	INodeExecutionData,
 	INodePropertyOptions,
 	INodeType,
@@ -266,6 +268,17 @@ export class HustleOps implements INodeType {
 				},
 			},
 		],
+	};
+
+	methods = {
+		credentialTest: {
+			async hustleOps(this: ICredentialTestFunctions): Promise<INodeCredentialTestResult> {
+				return {
+					status: 'OK',
+					message: 'Credentials accepted for metadata-first stub. HustleOps API was not contacted.',
+				};
+			},
+		},
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
