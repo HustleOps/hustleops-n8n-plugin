@@ -66,17 +66,26 @@ test('HustleOps node exposes the incident-response resources', () => {
 	);
 });
 
-test('HustleOps node provides the advertised metadata-first credential test', async () => {
+test('HustleOps node exposes a live credential test method', () => {
 	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
 	const node = new HustleOps();
-	const credentialTest = node.methods.credentialTest.hustleOps;
 
-	const result = await credentialTest.call({});
+	assert.equal(typeof node.methods.credentialTest.hustleOps, 'function');
+});
 
-	assert.deepEqual(result, {
-		status: 'OK',
-		message: 'Credentials accepted for metadata-first stub. HustleOps API was not contacted.',
-	});
+test('HustleOps credential test uses a low-impact authenticated endpoint', () => {
+	const nodeSource = fs.readFileSync(
+		path.join(__dirname, '..', 'nodes', 'HustleOps', 'HustleOps.node.ts'),
+		'utf8',
+	);
+	const helperSource = fs.readFileSync(
+		path.join(__dirname, '..', 'nodes', 'HustleOps', 'GenericFunctions.ts'),
+		'utf8',
+	);
+
+	assert.match(helperSource, /\/tags/);
+	assert.doesNotMatch(`${nodeSource}\n${helperSource}`, /\/picklists/);
+	assert.doesNotMatch(`${nodeSource}\n${helperSource}`, /\/auth\/me/);
 });
 
 test('HustleOps node exposes live core API operations', () => {

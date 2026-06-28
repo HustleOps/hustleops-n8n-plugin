@@ -445,3 +445,54 @@ test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and
 		/Alert search excludeIds must contain valid UUIDs/,
 	);
 });
+
+test('credential test reports authenticated endpoint failures without leaking the key', async () => {
+	const { testHustleOpsApiCredentials } = loadHelpers();
+	const calls = [];
+	const context = {
+		helpers: {
+			httpRequest: async () => {
+				calls.push('httpRequest');
+				const error = new Error('x-api-key=fixture-api-key');
+				error.response = {
+					statusCode: 401,
+					body: { statusCode: 401, message: 'Bad x-api-key fixture-api-key' },
+				};
+				throw error;
+			},
+		},
+	};
+
+	await assert.rejects(
+		testHustleOpsApiCredentials(context, {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		(error) => {
+			assert.match(error.message, /HustleOps API error 401/);
+			assert.doesNotMatch(error.message, /fixture-api-key/);
+			return true;
+		},
+	);
+	assert.deepEqual(calls, ['httpRequest']);
+});
+
+test('credential test can use legacy request helper when httpRequest is unavailable', async () => {
+	const { testHustleOpsApiCredentials } = loadHelpers();
+	const calls = [];
+	const context = {
+		helpers: {
+			request: async (options) => {
+				calls.push(options.url);
+				return { ok: true };
+			},
+		},
+	};
+
+	await testHustleOpsApiCredentials(context, {
+		baseUrl: 'https://hustleops.example.com',
+		apiKey: 'fixture-api-key',
+	});
+
+	assert.deepEqual(calls, ['https://hustleops.example.com/api/v1/tags']);
+});

@@ -1,4 +1,9 @@
-import type { IDataObject, IExecuteFunctions } from 'n8n-workflow';
+import type {
+	ICredentialDataDecryptedObject,
+	ICredentialTestFunctions,
+	IDataObject,
+	IExecuteFunctions,
+} from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
 import { HUSTLEOPS_API_KEY_HEADER } from './constants';
 
@@ -244,6 +249,38 @@ export function parseJsonObject(
 		throw new NodeOperationError(context.getNode(), `${fieldName} must be a valid JSON object.`, {
 			itemIndex,
 		});
+	}
+}
+
+export async function testHustleOpsApiCredentials(
+	context: ICredentialTestFunctions,
+	credentialData: ICredentialDataDecryptedObject,
+): Promise<void> {
+	const baseUrl = normalizeBaseUrl(String(credentialData.baseUrl ?? ''));
+	const apiKey = String(credentialData.apiKey ?? '');
+	const helpers = context.helpers as {
+		httpRequest?: (options: IDataObject) => Promise<unknown>;
+		request?: (options: IDataObject) => Promise<unknown>;
+	};
+	const request = helpers.httpRequest ?? helpers.request;
+
+	if (!request) {
+		throw new Error('n8n credential-test HTTP helper is not available.');
+	}
+
+	try {
+		await request.call(helpers, {
+			method: 'GET',
+			url: `${baseUrl}/tags`,
+			headers: {
+				[HUSTLEOPS_API_KEY_HEADER]: apiKey,
+				Accept: 'application/json',
+				'x-request-id': buildRequestId(0),
+			},
+			json: true,
+		});
+	} catch (error) {
+		throw new Error(formatApiError(error));
 	}
 }
 

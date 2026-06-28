@@ -1,4 +1,5 @@
 import type {
+	ICredentialDataDecryptedObject,
 	ICredentialTestFunctions,
 	IDataObject,
 	IExecuteFunctions,
@@ -15,6 +16,7 @@ import {
 	parseJsonObject,
 	parsePositiveInteger,
 	safePathSegment,
+	testHustleOpsApiCredentials,
 } from './GenericFunctions';
 import {
 	CORE_RESOURCE_OPTIONS,
@@ -206,11 +208,22 @@ export class HustleOps implements INodeType {
 
 	methods = {
 		credentialTest: {
-			async hustleOps(this: ICredentialTestFunctions): Promise<INodeCredentialTestResult> {
-				return {
-					status: 'OK',
-					message: 'Credentials accepted for metadata-first stub. HustleOps API was not contacted.',
-				};
+			async hustleOps(
+				this: ICredentialTestFunctions,
+				credential: { data?: ICredentialDataDecryptedObject },
+			): Promise<INodeCredentialTestResult> {
+				try {
+					await testHustleOpsApiCredentials(this, credential.data ?? {});
+					return {
+						status: 'OK',
+						message: 'HustleOps API credentials are valid.',
+					};
+				} catch (error) {
+					return {
+						status: 'Error',
+						message: error instanceof Error ? error.message : String(error),
+					};
+				}
 			},
 		},
 	};
