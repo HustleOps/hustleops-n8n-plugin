@@ -27,13 +27,15 @@ Create a `HustleOps API` credential in n8n with:
 - `Base URL`: the full HTTPS URL of your HustleOps instance. Use HTTP only for local development.
 - `API Key`: your HustleOps API key.
 
-Future API requests are expected to send:
+Live HustleOps API requests send the API key as:
 
 ```text
-Authorization: Bearer <apiKey>
+x-api-key: ho_sk_...
+Accept: application/json
+Content-Type: application/json
 ```
 
-If HustleOps uses a different header format, update the credential and request helper design before enabling live API calls.
+The API key acts as the user who owns the key, so that user's HustleOps permissions still apply.
 
 ## Development
 

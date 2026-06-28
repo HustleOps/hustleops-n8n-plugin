@@ -1,4 +1,5 @@
 import type { IAuthenticateGeneric, ICredentialType, INodeProperties } from 'n8n-workflow';
+import { HUSTLEOPS_API_KEY_HEADER } from '../nodes/HustleOps/constants';
 
 export class HustleOpsApi implements ICredentialType {
 	name = 'hustleOpsApi';
@@ -39,7 +40,7 @@ export class HustleOpsApi implements ICredentialType {
 		type: 'generic',
 		properties: {
 			headers: {
-				Authorization: '=Bearer {{$credentials.apiKey}}',
+				[HUSTLEOPS_API_KEY_HEADER]: '={{$credentials.apiKey}}',
 			},
 		},
 	};

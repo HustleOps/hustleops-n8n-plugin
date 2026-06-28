@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
+const { HUSTLEOPS_API_KEY_HEADER } = require('../dist/nodes/HustleOps/constants.js');
 
 const STUB_MESSAGE = 'HustleOps API execution is not active in this metadata-first version.';
 
@@ -33,7 +34,7 @@ test('HustleOps API credentials expose base URL and API key fields', () => {
 		type: 'generic',
 		properties: {
 			headers: {
-				Authorization: '=Bearer {{$credentials.apiKey}}',
+				[HUSTLEOPS_API_KEY_HEADER]: '={{$credentials.apiKey}}',
 			},
 		},
 	});
@@ -309,4 +310,6 @@ test('README states that real HustleOps API calls are not active in this version
 	assert.match(readme, /not published/i);
 	assert.match(readme, /local review/i);
 	assert.match(readme, /does not validate or send/i);
+	assert.match(readme, /x-api-key/i);
+	assert.doesNotMatch(readme, /Authorization: Bearer <apiKey>/);
 });
