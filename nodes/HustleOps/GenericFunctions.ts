@@ -37,6 +37,7 @@ export type PaginatedResponse = {
 	totalPages: number;
 };
 
+export const MAX_JSON_PARAMETER_CHARS = 100_000;
 const MAX_ERROR_MESSAGE_CHARS = 1000;
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -203,6 +204,47 @@ export function parsePositiveInteger(
 	}
 
 	return numericValue;
+}
+
+export function parseJsonObject(
+	context: IExecuteFunctions,
+	value: unknown,
+	fieldName: string,
+	itemIndex: number,
+): IDataObject {
+	if (value === undefined || value === null || value === '') {
+		return {};
+	}
+
+	if (typeof value === 'object' && !Array.isArray(value)) {
+		return value as IDataObject;
+	}
+
+	if (typeof value !== 'string') {
+		throw new NodeOperationError(context.getNode(), `${fieldName} must be a JSON object.`, {
+			itemIndex,
+		});
+	}
+
+	if (value.length > MAX_JSON_PARAMETER_CHARS) {
+		throw new NodeOperationError(
+			context.getNode(),
+			`${fieldName} is too large. Keep JSON parameters under ${MAX_JSON_PARAMETER_CHARS} characters.`,
+			{ itemIndex },
+		);
+	}
+
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			throw new Error('not an object');
+		}
+		return parsed as IDataObject;
+	} catch {
+		throw new NodeOperationError(context.getNode(), `${fieldName} must be a valid JSON object.`, {
+			itemIndex,
+		});
+	}
 }
 
 export async function createHustleOpsApiClient(

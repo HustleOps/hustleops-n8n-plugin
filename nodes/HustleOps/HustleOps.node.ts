@@ -1,5 +1,6 @@
 import type {
 	ICredentialTestFunctions,
+	IDataObject,
 	IExecuteFunctions,
 	INodeCredentialTestResult,
 	INodeExecutionData,
@@ -7,10 +8,20 @@ import type {
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
-import { NodeConnectionTypes } from 'n8n-workflow';
+import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+import {
+	assertPaginatedResponse,
+	createHustleOpsApiClient,
+	parseJsonObject,
+	parsePositiveInteger,
+	safePathSegment,
+} from './GenericFunctions';
 import {
 	CORE_RESOURCE_OPTIONS,
 	type CoreResource as HustleOpsResource,
+	buildSearchRequest,
+	getCoreResourceDefinition,
+	sanitizeDtoBody,
 } from './resourceDefinitions';
 
 export type HustleOpsOperation = 'search' | 'count' | 'get' | 'create' | 'update';
@@ -209,18 +220,135 @@ export class HustleOps implements INodeType {
 		const returnData: INodeExecutionData[] = [];
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
-			const resource = this.getNodeParameter('resource', itemIndex) as HustleOpsResource;
-			const operation = this.getNodeParameter('operation', itemIndex) as HustleOpsOperation;
+			try {
+				const resource = this.getNodeParameter('resource', itemIndex) as HustleOpsResource;
+				const operation = this.getNodeParameter('operation', itemIndex) as HustleOpsOperation;
+				const definition = getCoreResourceDefinition(resource);
+				const client = await createHustleOpsApiClient(this, itemIndex);
 
-			returnData.push({
-				json: {
-					resource,
-					operation,
-				},
-				pairedItem: {
-					item: itemIndex,
-				},
-			});
+				if (operation === 'get') {
+					const id = this.getNodeParameter('id', itemIndex) as string;
+					const response = await client.request<IDataObject>(
+						'GET',
+						`${definition.path}/${safePathSegment(id, `${definition.displayName} ID`)}`,
+					);
+					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					continue;
+				}
+
+				if (operation === 'create') {
+					const body = parseJsonObject(
+						this,
+						this.getNodeParameter('body', itemIndex),
+						'Body',
+						itemIndex,
+					);
+					const response = await client.request<IDataObject>(
+						'POST',
+						definition.path,
+						sanitizeDtoBody(definition, 'create', body),
+					);
+					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					continue;
+				}
+
+				if (operation === 'update') {
+					const id = this.getNodeParameter('id', itemIndex) as string;
+					const body = parseJsonObject(
+						this,
+						this.getNodeParameter('body', itemIndex),
+						'Body',
+						itemIndex,
+					);
+					const response = await client.request<IDataObject>(
+						'PATCH',
+						`${definition.path}/${safePathSegment(id, `${definition.displayName} ID`)}`,
+						sanitizeDtoBody(definition, 'update', body),
+					);
+					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					continue;
+				}
+
+				const searchBody = buildSearchRequest(
+					definition,
+					parseJsonObject(
+						this,
+						this.getNodeParameter('searchBody', itemIndex, '{}'),
+						'Search Body',
+						itemIndex,
+					),
+				);
+
+				if (operation === 'count') {
+					const response = await client.request<IDataObject>(
+						'POST',
+						`${definition.path}/count`,
+						searchBody,
+					);
+					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					continue;
+				}
+
+				const returnAll = this.getNodeParameter('returnAll', itemIndex, false) as boolean;
+				if (returnAll) {
+					const maxItems = parsePositiveInteger(
+						this,
+						this.getNodeParameter('maxItems', itemIndex, 1000),
+						'Max Items',
+						itemIndex,
+					);
+					const maxPages = parsePositiveInteger(
+						this,
+						this.getNodeParameter('maxPages', itemIndex, 100),
+						'Max Pages',
+						itemIndex,
+					);
+					await client.requestEachPage(
+						`${definition.path}/search`,
+						searchBody,
+						{ maxItems, maxPages },
+						(row) => returnData.push({ json: row, pairedItem: { item: itemIndex } }),
+					);
+					continue;
+				}
+
+				const response = assertPaginatedResponse(
+					await client.request('POST', `${definition.path}/search`, searchBody),
+					`${definition.displayName} search response`,
+				);
+
+				const includePaginationMetadata = this.getNodeParameter(
+					'includePaginationMetadata',
+					itemIndex,
+					false,
+				) as boolean;
+				if (includePaginationMetadata) {
+					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					continue;
+				}
+
+				for (const row of response.data) {
+					returnData.push({ json: row, pairedItem: { item: itemIndex } });
+				}
+			} catch (error) {
+				const nodeError =
+					error instanceof NodeOperationError
+						? error
+						: new NodeOperationError(
+								this.getNode(),
+								error instanceof Error ? error.message : String(error),
+								{ itemIndex },
+							);
+
+				if (!this.continueOnFail()) {
+					throw nodeError;
+				}
+
+				returnData.push({
+					json: { error: nodeError.message },
+					pairedItem: { item: itemIndex },
+				});
+			}
 		}
 
 		return [returnData];
