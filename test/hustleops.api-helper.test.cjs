@@ -225,3 +225,223 @@ test('assertPaginatedResponse rejects malformed paginated responses', () => {
 		/Alert search response must include integer totalPages/,
 	);
 });
+
+test('core resource definitions expose API paths and default search sorts', () => {
+	const { CORE_RESOURCE_DEFINITIONS } = require('../dist/nodes/HustleOps/resourceDefinitions.js');
+
+	assert.equal(CORE_RESOURCE_DEFINITIONS.alert.path, '/alerts');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.alert.defaultSortBy, 'detectedAt');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.incident.path, '/incidents');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.incident.defaultSortBy, 'createdAt');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.observable.path, '/observables');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.observable.defaultSortBy, 'lastSeen');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.knowledge.path, '/knowledge');
+	assert.equal(CORE_RESOURCE_DEFINITIONS.knowledge.defaultSortBy, 'createdAt');
+});
+
+test('sanitizeDtoBody rejects unknown fields and strips undefined values', () => {
+	const { CORE_RESOURCE_DEFINITIONS, sanitizeDtoBody } =
+		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+
+	assert.deepEqual(
+		sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+			name: 'Suspicious login',
+			description: 'Okta anomaly',
+			severity: 'HIGH',
+			tlp: 'AMBER',
+			source: 'okta',
+			type: 'identity',
+			sourceRef: 'evt_1',
+			detectedAt: '2026-06-28T12:00:00.000Z',
+			tags: undefined,
+		}),
+		{
+			name: 'Suspicious login',
+			description: 'Okta anomaly',
+			severity: 'HIGH',
+			tlp: 'AMBER',
+			source: 'okta',
+			type: 'identity',
+			sourceRef: 'evt_1',
+			detectedAt: '2026-06-28T12:00:00.000Z',
+		},
+	);
+
+	assert.throws(
+		() => sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', { name: 'x', createdById: 'user-1' }),
+		/Unsupported Alert create field: createdById/,
+	);
+	assert.throws(
+		() => sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.incident, 'update', { source: 'okta' }),
+		/Unsupported Incident update field: source/,
+	);
+});
+
+test('buildSearchRequest defaults pagination and validates sort fields', () => {
+	const { CORE_RESOURCE_DEFINITIONS, buildSearchRequest } =
+		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+
+	assert.deepEqual(buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {}), {
+		pagination: {
+			page: 1,
+			pageSize: 25,
+			sortBy: 'detectedAt',
+			sortOrder: 'desc',
+		},
+	});
+
+	assert.deepEqual(
+		buildSearchRequest(CORE_RESOURCE_DEFINITIONS.incident, {
+			filter: {
+				operator: 'AND',
+				groups: [
+					{
+						operator: 'AND',
+						conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }],
+					},
+				],
+			},
+			pagination: { sortBy: 'createdAt', sortOrder: 'asc' },
+		}),
+		{
+			filter: {
+				operator: 'AND',
+				groups: [
+					{
+						operator: 'AND',
+						conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }],
+					},
+				],
+			},
+			pagination: {
+				page: 1,
+				pageSize: 25,
+				sortBy: 'createdAt',
+				sortOrder: 'asc',
+			},
+		},
+	);
+
+	assert.equal(
+		buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+			pagination: { sortBy: 'displayId' },
+		}).pagination.sortBy,
+		'displayId',
+	);
+
+	assert.throws(
+		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.knowledge, { pagination: { sortBy: 'severity' } }),
+		/Unsupported Knowledge search sort field: severity/,
+	);
+});
+
+test('sanitizeDtoBody enforces required create fields and rejects empty updates', () => {
+	const { CORE_RESOURCE_DEFINITIONS, sanitizeDtoBody } =
+		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+
+	assert.throws(
+		() => sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', { name: 'x' }),
+		/Missing required Alert create field: description/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.incident, 'create', {
+				name: 'x',
+				description: 'x',
+				severity: 'HIGH',
+				tlp: 'AMBER',
+			}),
+		/Missing required Incident create field: category/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.observable, 'create', {
+				value: '198.51.100.10',
+				type: 'ip',
+			}),
+		/Missing required Observable create field: threatLevel/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.knowledge, 'create', {
+				value: 'Runbook',
+				type: 'runbook',
+			}),
+		/Missing required Knowledge create field: tlp/,
+	);
+	assert.throws(
+		() => sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.knowledge, 'update', {}),
+		/Knowledge update body must include at least one supported field/,
+	);
+});
+
+test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and unsafe filter size', () => {
+	const { CORE_RESOURCE_DEFINITIONS, buildSearchRequest } =
+		require('../dist/nodes/HustleOps/resourceDefinitions.js');
+
+	assert.throws(
+		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, { where: {} }),
+		/Unsupported Alert search request field: where/,
+	);
+	assert.throws(
+		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, { pagination: { page: 0 } }),
+		/Alert search pagination.page must be between 1 and 10000/,
+	);
+	assert.throws(
+		() =>
+			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+				filter: {
+					operator: 'AND',
+					groups: new Array(21).fill({
+						operator: 'AND',
+						conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }],
+					}),
+				},
+			}),
+		/Alert search filter cannot contain more than 20 groups/,
+	);
+	assert.throws(
+		() =>
+			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+				filter: { operator: 'AND', groups: [] },
+			}),
+		/Alert search filter must contain at least one group/,
+	);
+	assert.throws(
+		() =>
+			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+				filter: {
+					operator: 'AND',
+					groups: [
+						{
+							operator: 'AND',
+							conditions: [{ field: 'severity', operator: 'endsWith', value: 'HIGH' }],
+						},
+					],
+				},
+			}),
+		/Unsupported Alert search operator: endsWith/,
+	);
+	assert.throws(
+		() =>
+			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+				filter: {
+					operator: 'AND',
+					groups: [
+						{
+							operator: 'AND',
+							conditions: [{ field: 'severity', operator: 'in', value: 'HIGH' }],
+						},
+					],
+				},
+			}),
+		/Alert search operator in requires an array value/,
+	);
+	assert.throws(
+		() =>
+			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+				excludeIds: ['../users'],
+			}),
+		/Alert search excludeIds must contain valid UUIDs/,
+	);
+});
