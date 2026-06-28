@@ -51,6 +51,8 @@ const MAX_SEARCH_DEPTH = 4;
 const MAX_PAGE = 10000;
 const MAX_PAGE_SIZE = 100;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SEVERITY_VALUES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const;
+const TLP_VALUES = ['RED', 'AMBER_STRICT', 'AMBER', 'GREEN', 'CLEAR'] as const;
 const RESOURCE_DEFINITION_NODE: INode = {
 	id: 'hustleops-resource-definitions',
 	name: 'HustleOps',
@@ -196,13 +198,13 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'severity',
 				type: 'enum',
 				requiredForCreate: true,
-				allowedValues: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+				allowedValues: SEVERITY_VALUES,
 			},
 			tlp: {
 				name: 'tlp',
 				type: 'enum',
 				requiredForCreate: true,
-				allowedValues: ['CLEAR', 'GREEN', 'AMBER', 'RED'],
+				allowedValues: TLP_VALUES,
 			},
 			source: { name: 'source', type: 'string', requiredForCreate: true },
 			type: { name: 'type', type: 'string', requiredForCreate: true },
@@ -258,13 +260,13 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'severity',
 				type: 'enum',
 				requiredForCreate: true,
-				allowedValues: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+				allowedValues: SEVERITY_VALUES,
 			},
 			tlp: {
 				name: 'tlp',
 				type: 'enum',
 				requiredForCreate: true,
-				allowedValues: ['CLEAR', 'GREEN', 'AMBER', 'RED'],
+				allowedValues: TLP_VALUES,
 			},
 			status: { name: 'status', type: 'string' },
 			category: { name: 'category', type: 'string', requiredForCreate: true },
@@ -318,7 +320,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'tlp',
 				type: 'enum',
 				requiredForCreate: true,
-				allowedValues: ['CLEAR', 'GREEN', 'AMBER', 'RED'],
+				allowedValues: TLP_VALUES,
 			},
 			criticality: { name: 'criticality', type: 'string' },
 			firstSeen: { name: 'firstSeen', type: 'date-time', requiredForCreate: true },
@@ -348,7 +350,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'tlp',
 				type: 'enum',
 				requiredForCreate: true,
-				allowedValues: ['CLEAR', 'GREEN', 'AMBER', 'RED'],
+				allowedValues: TLP_VALUES,
 			},
 			version: { name: 'version', type: 'number' },
 			tags: { name: 'tags', type: 'tags' },

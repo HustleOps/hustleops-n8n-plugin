@@ -295,6 +295,56 @@ test('sanitizeDtoBody rejects unknown fields and strips undefined values', () =>
 	);
 });
 
+test('sanitizeDtoBody accepts all API-supported severity and TLP enum values', () => {
+	const {
+		CORE_RESOURCE_DEFINITIONS,
+		sanitizeDtoBody,
+	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
+
+	assert.equal(
+		sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+			name: 'Informational alert',
+			description: 'Routine informational event',
+			severity: 'INFO',
+			tlp: 'AMBER_STRICT',
+			source: 'okta',
+			type: 'identity',
+			sourceRef: 'evt-info-1',
+			detectedAt: '2026-06-28T12:00:00.000Z',
+		}).severity,
+		'INFO',
+	);
+	assert.equal(
+		sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.incident, 'create', {
+			name: 'Strict sharing incident',
+			description: 'Incident with strict sharing requirements',
+			severity: 'INFO',
+			tlp: 'AMBER_STRICT',
+			category: 'access',
+		}).tlp,
+		'AMBER_STRICT',
+	);
+	assert.equal(
+		sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.observable, 'create', {
+			value: '198.51.100.10',
+			type: 'ip',
+			threatLevel: 'UNKNOWN',
+			tlp: 'AMBER_STRICT',
+			firstSeen: '2026-06-28T12:00:00.000Z',
+			lastSeen: '2026-06-28T12:00:00.000Z',
+		}).tlp,
+		'AMBER_STRICT',
+	);
+	assert.equal(
+		sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.knowledge, 'create', {
+			value: 'Escalation runbook',
+			type: 'runbook',
+			tlp: 'AMBER_STRICT',
+		}).tlp,
+		'AMBER_STRICT',
+	);
+});
+
 test('buildSearchRequest defaults pagination and validates sort fields', () => {
 	const {
 		CORE_RESOURCE_DEFINITIONS,
