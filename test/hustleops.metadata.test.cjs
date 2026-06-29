@@ -6,7 +6,7 @@ const { HUSTLEOPS_API_KEY_HEADER } = require('../dist/nodes/HustleOps/constants.
 
 const LIVE_DESCRIPTION = 'Work with HustleOps incident response objects through the HustleOps API.';
 
-test('HustleOps API credentials expose base URL and API key fields', () => {
+test('HustleOps API credentials expose connection fields', () => {
 	const { HustleOpsApi } = require('../dist/credentials/HustleOpsApi.credentials.js');
 	const credentials = new HustleOpsApi();
 
@@ -19,6 +19,9 @@ test('HustleOps API credentials expose base URL and API key fields', () => {
 
 	const baseUrl = credentials.properties.find((property) => property.name === 'baseUrl');
 	const apiKey = credentials.properties.find((property) => property.name === 'apiKey');
+	const ignoreSslIssues = credentials.properties.find(
+		(property) => property.name === 'ignoreSslIssues',
+	);
 
 	assert.equal(baseUrl.displayName, 'Base URL');
 	assert.equal(baseUrl.type, 'string');
@@ -29,6 +32,14 @@ test('HustleOps API credentials expose base URL and API key fields', () => {
 	assert.equal(apiKey.type, 'string');
 	assert.equal(apiKey.required, true);
 	assert.equal(apiKey.typeOptions.password, true);
+
+	assert.equal(ignoreSslIssues.displayName, 'Ignore SSL Issues');
+	assert.equal(ignoreSslIssues.type, 'boolean');
+	assert.equal(ignoreSslIssues.default, false);
+	assert.equal(
+		ignoreSslIssues.description,
+		'Whether to connect even if SSL certificate validation is not possible',
+	);
 
 	assert.deepEqual(credentials.authenticate, {
 		type: 'generic',

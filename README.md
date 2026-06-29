@@ -70,6 +70,7 @@ Create a `HustleOps API` credential in n8n with:
 
 - `Base URL`: the full HTTPS URL of your HustleOps instance. Use HTTP only for local development on `localhost`, `127.0.0.1`, or `::1`.
 - `API Key`: your HustleOps API key.
+- `Ignore SSL Issues`: disabled by default. Enable only for local or private test instances that use a self-signed certificate. For production, install a trusted certificate or add the issuing CA to the n8n/Node trust store.
 
 Requests send:
 

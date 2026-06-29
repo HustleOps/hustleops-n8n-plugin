@@ -17,6 +17,7 @@ export type HustleOpsQueryParams = Record<string, string | number | boolean | nu
 type HustleOpsCredentials = {
 	baseUrl: string;
 	apiKey: string;
+	ignoreSslIssues?: boolean | string;
 };
 
 type PaginationOptions = {
@@ -164,6 +165,10 @@ export function compactObject<T>(value: T): T {
 
 function buildRequestId(itemIndex: number): string {
 	return `hustleops-n8n-${Date.now()}-${itemIndex}`;
+}
+
+function shouldIgnoreSslIssues(value: unknown): boolean {
+	return value === true || value === 'true';
 }
 
 function getErrorBody(error: unknown): IDataObject {
@@ -341,10 +346,12 @@ export async function testHustleOpsApiCredentials(
 ): Promise<void> {
 	const baseUrl = normalizeBaseUrl(String(credentialData.baseUrl ?? ''));
 	const apiKey = String(credentialData.apiKey ?? '');
+	const ignoreSslIssues = shouldIgnoreSslIssues(credentialData.ignoreSslIssues);
 	const helpers = context.helpers as {
 		httpRequest?: (options: IDataObject) => Promise<unknown>;
 		request?: (options: IDataObject) => Promise<unknown>;
 	};
+	const usesHttpRequest = !!helpers.httpRequest;
 	const request = helpers.httpRequest ?? helpers.request;
 
 	if (!request) {
@@ -361,6 +368,8 @@ export async function testHustleOpsApiCredentials(
 				'x-request-id': buildRequestId(0),
 			},
 			json: true,
+			...(ignoreSslIssues && usesHttpRequest ? { skipSslCertificateValidation: true } : {}),
+			...(ignoreSslIssues && !usesHttpRequest ? { rejectUnauthorized: false } : {}),
 		});
 	} catch (error) {
 		throw new NodeOperationError(HELPER_NODE, formatApiError(error));
@@ -373,6 +382,7 @@ export async function createHustleOpsApiClient(
 ): Promise<HustleOpsApiClient> {
 	const credentials = (await context.getCredentials('hustleOpsApi')) as HustleOpsCredentials;
 	const baseUrl = normalizeBaseUrl(credentials.baseUrl);
+	const ignoreSslIssues = shouldIgnoreSslIssues(credentials.ignoreSslIssues);
 
 	function buildRequestUrl(path: string, query?: HustleOpsQueryParams): string {
 		const url = new URL(`${baseUrl}${path}`);
@@ -406,6 +416,7 @@ export async function createHustleOpsApiClient(
 				},
 				body: hasJsonBody ? compactObject(body) : undefined,
 				json: true,
+				...(ignoreSslIssues ? { skipSslCertificateValidation: true } : {}),
 			})) as T;
 		} catch (error) {
 			throw new NodeOperationError(context.getNode(), formatApiError(error), { itemIndex });

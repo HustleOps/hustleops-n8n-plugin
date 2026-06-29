@@ -34,6 +34,13 @@ export class HustleOpsApi implements ICredentialType {
 			required: true,
 			description: 'API key used to authenticate with HustleOps.',
 		},
+		{
+			displayName: 'Ignore SSL Issues',
+			name: 'ignoreSslIssues',
+			type: 'boolean',
+			default: false,
+			description: 'Whether to connect even if SSL certificate validation is not possible',
+		},
 	];
 
 	authenticate: IAuthenticateGeneric = {

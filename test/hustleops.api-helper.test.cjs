@@ -94,6 +94,32 @@ test('hustleOpsApiRequest sends x-api-key, JSON headers, normalized URL, and req
 	assert.match(calls[0].headers['x-request-id'], /^hustleops-n8n-/);
 	assert.deepEqual(calls[0].body, {});
 	assert.equal(calls[0].json, true);
+	assert.equal(calls[0].skipSslCertificateValidation, undefined);
+});
+
+test('hustleOpsApiRequest can skip SSL certificate validation when credentials allow it', async () => {
+	const { hustleOpsApiRequest } = loadHelpers();
+	const calls = [];
+	const context = {
+		getNode: () => ({ name: 'HustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+			ignoreSslIssues: true,
+		}),
+		helpers: {
+			httpRequest: async (options) => {
+				calls.push(options);
+				return { ok: true };
+			},
+		},
+	};
+
+	await hustleOpsApiRequest(context, 'GET', '/tags', undefined, 0);
+
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/tags');
+	assert.equal(calls[0].skipSslCertificateValidation, true);
 });
 
 test('hustleOpsApiRequest maps HustleOps error bodies into node errors', async () => {
@@ -758,6 +784,29 @@ test('credential test reports authenticated endpoint failures without leaking th
 		},
 	);
 	assert.deepEqual(calls, ['httpRequest']);
+});
+
+test('credential test can skip SSL certificate validation when credentials allow it', async () => {
+	const { testHustleOpsApiCredentials } = loadHelpers();
+	const calls = [];
+	const context = {
+		helpers: {
+			httpRequest: async (options) => {
+				calls.push(options);
+				return { ok: true };
+			},
+		},
+	};
+
+	await testHustleOpsApiCredentials(context, {
+		baseUrl: 'https://hustleops.example.com',
+		apiKey: 'fixture-api-key',
+		ignoreSslIssues: true,
+	});
+
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/tags');
+	assert.equal(calls[0].skipSslCertificateValidation, true);
 });
 
 test('credential test can use legacy request helper when httpRequest is unavailable', async () => {
