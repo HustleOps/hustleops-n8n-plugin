@@ -2,21 +2,59 @@
 
 This package provides an n8n community node for HustleOps incident response workflows.
 
-The current package supports live HustleOps API requests for core alert, incident, observable, knowledge, and comment operations.
+The current package supports live HustleOps API requests for core alert, incident, observable, knowledge, comment, tag, and custom field operations.
 
 ## Supported Resources And Operations
 
-| Resource   | Operations                                                                                     |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| Alert      | Search, Count, Get, Create, Update                                                             |
-| Incident   | Search, Count, Get, Create, Update                                                             |
-| Observable | Search, Count, Get, Create, Update                                                             |
-| Knowledge  | Search, Count, Get, Create, Update                                                             |
-| Comment    | List, Search, Get Unread Count, Create, Mark Read, Update, Delete, Toggle Reaction, Toggle Pin |
+| Resource     | Operations                                                                                                                                                                                                                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Alert        | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
+| Incident     | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
+| Observable   | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
+| Knowledge    | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
+| Comment      | List, Search, Get Unread Count, Create, Mark Read, Update, Delete, Toggle Reaction, Toggle Pin                                                                                                                                                                                                     |
+| Tag          | List, Search, Create, Update Color, Bulk Update Color, Delete, Bulk Delete                                                                                                                                                                                                                         |
+| Custom Field | List Groups, Create Group, Update Group, Delete Group, List Definitions, Search Definitions, Create Definition, Update Definition, Bulk Update Definitions, Delete Definition, Bulk Delete Definitions, Get Values, Get Available, Batch Get Values, Replace Values, Update Selected Values Safely |
 
 Search operations call HustleOps `/search` endpoints with a JSON Search Body. Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
 
 Create and Update operations accept JSON bodies. Unsupported fields fail before a request is sent because the HustleOps API rejects unknown DTO fields.
+
+## Tag Operations
+
+Core resources expose `Set Tags`, `Add Tags`, and `Remove Tag` operations directly under Alert, Incident, Observable, and Knowledge.
+
+- `Set Tags`: calls `PUT /<resource>/:id/tags` with `{ "values": [...] }`. An empty array clears all tags.
+- `Add Tags`: calls `POST /<resource>/:id/tags` and requires at least one value.
+- `Remove Tag`: calls `DELETE /<resource>/:id/tags/:tagId`.
+
+Tag values are validated before the API request is sent: at most 20 tags per entity, at most 30 characters per tag, and only letters, numbers, spaces, and `* ! @ # $ : . - _ =`.
+
+The `Tag` resource covers admin tag management:
+
+- `List`: calls `GET /tags`, with optional `withCounts=true` for admin-only counts.
+- `Search`: calls `POST /tags/search` with a SearchRequest body.
+- `Create`: calls `POST /tags` with `{ "value": "vip", "color": "#0EA5E9" }`.
+- `Update Color`: calls `PATCH /tags/:id` with `{ "color": "#A855F7" }`. Tag values are immutable.
+- `Bulk Update Color`: calls `PATCH /tags/bulk` with `{ "ids": [...], "color": "#22C55E" }`.
+- `Delete`: calls `DELETE /tags/:id?force=true` when Force is enabled.
+- `Bulk Delete`: calls `POST /tags/bulk-delete` with `{ "ids": [...], "force": true }`.
+
+## Custom Field Operations
+
+The `Custom Field` resource covers custom field groups, definitions, and values.
+
+Group operations call `/custom-fields/groups`. Definition operations call `/custom-fields/definitions`, `/custom-fields/definitions/search`, `/custom-fields/definitions/bulk`, and `/custom-fields/definitions/bulk-delete`. Definition update rejects `fieldType` because field type is immutable.
+
+Value operations use uppercase entity types: `ALERT`, `INCIDENT`, `OBSERVABLE`, and `KNOWLEDGE`.
+
+- `Get Values`: calls `GET /custom-fields/values/:entityType/:entityId`.
+- `Get Available`: calls `GET /custom-fields/available/:entityType/:entityId`.
+- `Batch Get Values`: calls `POST /custom-fields/values/batch` with `{ "entityType": "ALERT", "entityIds": [...] }` and allows up to 100 IDs.
+- `Replace Values`: calls `PATCH /custom-fields/values/:entityType/:entityId` with the exact attached field set to keep.
+- `Update Selected Values Safely`: first reads existing values, merges selected field changes, then patches the complete attached field set so omitted attached fields are preserved.
+
+Custom field values sent to the API are strings or `null`. `MULTI_SELECT` array inputs are serialized with `JSON.stringify`, so `["a", "b"]` is sent as `"[\"a\",\"b\"]"`. BOOLEAN values must be `"true"` or `"false"`; NUMBER, DATE, and URL values are validated before sending.
 
 ## Getting an API Key
 
@@ -240,6 +278,6 @@ npm run dev
 
 Attachment upload and download are not included in this implementation slice. Comment create can reference up to three staged attachment IDs when another workflow has already uploaded those files.
 
-Admin-only resources such as webhooks, users, teams, roles, system settings, and custom-field definitions are not included.
+Admin-only resources such as webhooks, users, teams, roles, and system settings are not included.
 
 The package is still private and is not published to npm.

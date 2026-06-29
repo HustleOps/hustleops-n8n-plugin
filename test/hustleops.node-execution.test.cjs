@@ -587,3 +587,494 @@ test('comment operations reject unsupported body fields before credentials are r
 	assert.equal(calls.length, 0);
 	assert.equal(getCredentialsCalled, false);
 });
+
+test('tag resource operations call the requested admin endpoints', async () => {
+	const tagId = '11111111-1111-4111-8111-111111111111';
+	const secondTagId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[
+			{ resource: 'tag', operation: 'list', withCounts: true },
+			{
+				resource: 'tag',
+				operation: 'search',
+				tagBody: '{"filter":{"operator":"AND","groups":[]}}',
+			},
+			{ resource: 'tag', operation: 'create', tagBody: '{"value":"vip","color":"#0EA5E9"}' },
+			{ resource: 'tag', operation: 'updateColor', tagId, tagBody: '{"color":"#A855F7"}' },
+			{
+				resource: 'tag',
+				operation: 'bulkUpdateColor',
+				tagBody: JSON.stringify({ ids: [tagId, secondTagId], color: '#22C55E' }),
+			},
+			{ resource: 'tag', operation: 'delete', tagId, force: true },
+			{
+				resource: 'tag',
+				operation: 'bulkDelete',
+				tagBody: JSON.stringify({ ids: [tagId, secondTagId], force: true }),
+			},
+		],
+		(options) =>
+			options.url.endsWith('/tags/search')
+				? { data: [{ id: 'tag-search-result' }], total: 1, page: 1, pageSize: 25, totalPages: 1 }
+				: { ok: true },
+	);
+
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/tags?withCounts=true');
+	assert.equal(calls[0].body, undefined);
+
+	assert.equal(calls[1].method, 'POST');
+	assert.equal(calls[1].url, 'https://hustleops.example.com/api/v1/tags/search');
+	assert.deepEqual(calls[1].body, { filter: { operator: 'AND', groups: [] } });
+
+	assert.equal(calls[2].method, 'POST');
+	assert.equal(calls[2].url, 'https://hustleops.example.com/api/v1/tags');
+	assert.deepEqual(calls[2].body, { value: 'vip', color: '#0EA5E9' });
+
+	assert.equal(calls[3].method, 'PATCH');
+	assert.equal(calls[3].url, `https://hustleops.example.com/api/v1/tags/${tagId}`);
+	assert.deepEqual(calls[3].body, { color: '#A855F7' });
+
+	assert.equal(calls[4].method, 'PATCH');
+	assert.equal(calls[4].url, 'https://hustleops.example.com/api/v1/tags/bulk');
+	assert.deepEqual(calls[4].body, { ids: [tagId, secondTagId], color: '#22C55E' });
+
+	assert.equal(calls[5].method, 'DELETE');
+	assert.equal(calls[5].url, `https://hustleops.example.com/api/v1/tags/${tagId}?force=true`);
+	assert.equal(calls[5].body, undefined);
+
+	assert.equal(calls[6].method, 'POST');
+	assert.equal(calls[6].url, 'https://hustleops.example.com/api/v1/tags/bulk-delete');
+	assert.deepEqual(calls[6].body, { ids: [tagId, secondTagId], force: true });
+});
+
+test('entity tag operations are exposed under core resources', async () => {
+	const alertId = '11111111-1111-4111-8111-111111111111';
+	const incidentId = '22222222-2222-4222-8222-222222222222';
+	const observableId = '33333333-3333-4333-8333-333333333333';
+	const tagId = '44444444-4444-4444-8444-444444444444';
+	const { calls } = await execute(
+		[
+			{ resource: 'alert', operation: 'setTags', id: alertId, tagValues: '[]' },
+			{
+				resource: 'incident',
+				operation: 'addTags',
+				id: incidentId,
+				tagValues: '["phishing","vip"]',
+			},
+			{ resource: 'observable', operation: 'removeTag', id: observableId, tagId },
+		],
+		() => ({ ok: true }),
+	);
+
+	assert.equal(calls[0].method, 'PUT');
+	assert.equal(calls[0].url, `https://hustleops.example.com/api/v1/alerts/${alertId}/tags`);
+	assert.deepEqual(calls[0].body, { values: [] });
+
+	assert.equal(calls[1].method, 'POST');
+	assert.equal(calls[1].url, `https://hustleops.example.com/api/v1/incidents/${incidentId}/tags`);
+	assert.deepEqual(calls[1].body, { values: ['phishing', 'vip'] });
+
+	assert.equal(calls[2].method, 'DELETE');
+	assert.equal(
+		calls[2].url,
+		`https://hustleops.example.com/api/v1/observables/${observableId}/tags/${tagId}`,
+	);
+	assert.equal(calls[2].body, undefined);
+});
+
+test('entity add tags rejects empty values before an API request is sent', async () => {
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'knowledge',
+				operation: 'addTags',
+				id: '11111111-1111-4111-8111-111111111111',
+				tagValues: '[]',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Add Tags requires at least one tag value/);
+	assert.equal(calls.length, 0);
+});
+
+test('tag and custom field boolean JSON fields reject string values', async () => {
+	const tagId = '11111111-1111-4111-8111-111111111111';
+	const definitionId = '22222222-2222-4222-8222-222222222222';
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'tag',
+				operation: 'bulkDelete',
+				tagBody: JSON.stringify({ ids: [tagId], force: 'false' }),
+			},
+			{
+				resource: 'customField',
+				operation: 'bulkUpdateDefinitions',
+				customFieldBody: JSON.stringify({ ids: [definitionId], isRequired: 'false' }),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Tag bulk delete force must be a boolean/);
+	assert.equal(calls.length, 0);
+
+	const customFieldOnly = createContext(
+		[
+			{
+				resource: 'customField',
+				operation: 'bulkUpdateDefinitions',
+				customFieldBody: JSON.stringify({ ids: [definitionId], isRequired: 'false' }),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(
+		node.execute.call(customFieldOnly.context),
+		/Custom field definition isRequired must be a boolean/,
+	);
+	assert.equal(customFieldOnly.calls.length, 0);
+});
+
+test('admin search operations emit one item per paginated data row', async () => {
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'tag',
+				operation: 'search',
+				tagBody: '{"pagination":{"page":1,"pageSize":2}}',
+			},
+			{
+				resource: 'customField',
+				operation: 'searchDefinitions',
+				customFieldBody: '{"pagination":{"page":1,"pageSize":1}}',
+			},
+		],
+		(options) => {
+			if (options.url.endsWith('/tags/search')) {
+				return {
+					data: [{ id: 'tag-1' }, { id: 'tag-2' }],
+					total: 2,
+					page: 1,
+					pageSize: 2,
+					totalPages: 1,
+				};
+			}
+			return {
+				data: [{ id: 'field-1' }],
+				total: 1,
+				page: 1,
+				pageSize: 1,
+				totalPages: 1,
+			};
+		},
+	);
+
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/tags/search');
+	assert.equal(
+		calls[1].url,
+		'https://hustleops.example.com/api/v1/custom-fields/definitions/search',
+	);
+	assert.deepEqual(
+		result[0].map((item) => item.json),
+		[{ id: 'tag-1' }, { id: 'tag-2' }, { id: 'field-1' }],
+	);
+});
+
+test('custom field operations call group, definition, and value endpoints', async () => {
+	const groupId = '11111111-1111-4111-8111-111111111111';
+	const definitionId = '22222222-2222-4222-8222-222222222222';
+	const secondDefinitionId = '33333333-3333-4333-8333-333333333333';
+	const alertId = '44444444-4444-4444-8444-444444444444';
+	const incidentId = '55555555-5555-4555-8555-555555555555';
+	const observableId = '66666666-6666-4666-8666-666666666666';
+	const knowledgeId = '77777777-7777-4777-8777-777777777777';
+	const { calls } = await execute(
+		[
+			{ resource: 'customField', operation: 'listGroups' },
+			{
+				resource: 'customField',
+				operation: 'createGroup',
+				customFieldBody: '{"name":"Classification","description":"Routing","sortOrder":10}',
+			},
+			{
+				resource: 'customField',
+				operation: 'updateGroup',
+				customFieldGroupId: groupId,
+				customFieldBody: '{"name":"Updated Classification"}',
+			},
+			{
+				resource: 'customField',
+				operation: 'deleteGroup',
+				customFieldGroupId: groupId,
+				force: true,
+			},
+			{ resource: 'customField', operation: 'listDefinitions' },
+			{
+				resource: 'customField',
+				operation: 'searchDefinitions',
+				customFieldBody: '{"pagination":{"page":1,"pageSize":25}}',
+			},
+			{
+				resource: 'customField',
+				operation: 'createDefinition',
+				customFieldBody: JSON.stringify({
+					name: 'Business Unit',
+					fieldType: 'SELECT',
+					options: ['finance', 'ops'],
+					entityTypes: ['ALERT', 'INCIDENT'],
+					groupId,
+				}),
+			},
+			{
+				resource: 'customField',
+				operation: 'updateDefinition',
+				customFieldDefinitionId: definitionId,
+				customFieldBody: '{"name":"Business Impact","isRequired":true}',
+			},
+			{
+				resource: 'customField',
+				operation: 'bulkUpdateDefinitions',
+				customFieldBody: JSON.stringify({
+					ids: [definitionId, secondDefinitionId],
+					isRequired: false,
+					groupId,
+				}),
+			},
+			{
+				resource: 'customField',
+				operation: 'deleteDefinition',
+				customFieldDefinitionId: definitionId,
+				force: true,
+			},
+			{
+				resource: 'customField',
+				operation: 'bulkDeleteDefinitions',
+				customFieldBody: JSON.stringify({ ids: [definitionId, secondDefinitionId], force: true }),
+			},
+			{ resource: 'customField', operation: 'getValues', entityType: 'ALERT', entityId: alertId },
+			{
+				resource: 'customField',
+				operation: 'getAvailable',
+				entityType: 'INCIDENT',
+				entityId: incidentId,
+			},
+			{
+				resource: 'customField',
+				operation: 'batchGetValues',
+				entityType: 'OBSERVABLE',
+				entityIds: JSON.stringify([observableId]),
+			},
+			{
+				resource: 'customField',
+				operation: 'replaceValues',
+				entityType: 'KNOWLEDGE',
+				entityId: knowledgeId,
+				customFieldValues: JSON.stringify([
+					{ fieldId: definitionId, value: ['pci', 'sox'], fieldType: 'MULTI_SELECT' },
+				]),
+			},
+		],
+		(options) =>
+			options.url.endsWith('/custom-fields/definitions/search')
+				? {
+						data: [{ id: 'definition-search-result' }],
+						total: 1,
+						page: 1,
+						pageSize: 25,
+						totalPages: 1,
+					}
+				: { ok: true },
+	);
+
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/custom-fields/groups');
+
+	assert.equal(calls[1].method, 'POST');
+	assert.equal(calls[1].url, 'https://hustleops.example.com/api/v1/custom-fields/groups');
+	assert.deepEqual(calls[1].body, {
+		name: 'Classification',
+		description: 'Routing',
+		sortOrder: 10,
+	});
+
+	assert.equal(calls[2].method, 'PATCH');
+	assert.equal(
+		calls[2].url,
+		`https://hustleops.example.com/api/v1/custom-fields/groups/${groupId}`,
+	);
+	assert.deepEqual(calls[2].body, { name: 'Updated Classification' });
+
+	assert.equal(calls[3].method, 'DELETE');
+	assert.equal(
+		calls[3].url,
+		`https://hustleops.example.com/api/v1/custom-fields/groups/${groupId}?force=true`,
+	);
+
+	assert.equal(calls[4].method, 'GET');
+	assert.equal(calls[4].url, 'https://hustleops.example.com/api/v1/custom-fields/definitions');
+
+	assert.equal(calls[5].method, 'POST');
+	assert.equal(
+		calls[5].url,
+		'https://hustleops.example.com/api/v1/custom-fields/definitions/search',
+	);
+	assert.deepEqual(calls[5].body, { pagination: { page: 1, pageSize: 25 } });
+
+	assert.equal(calls[6].method, 'POST');
+	assert.equal(calls[6].url, 'https://hustleops.example.com/api/v1/custom-fields/definitions');
+	assert.deepEqual(calls[6].body, {
+		name: 'Business Unit',
+		fieldType: 'SELECT',
+		options: ['finance', 'ops'],
+		entityTypes: ['ALERT', 'INCIDENT'],
+		groupId,
+	});
+
+	assert.equal(calls[7].method, 'PATCH');
+	assert.equal(
+		calls[7].url,
+		`https://hustleops.example.com/api/v1/custom-fields/definitions/${definitionId}`,
+	);
+	assert.deepEqual(calls[7].body, { name: 'Business Impact', isRequired: true });
+
+	assert.equal(calls[8].method, 'PATCH');
+	assert.equal(calls[8].url, 'https://hustleops.example.com/api/v1/custom-fields/definitions/bulk');
+	assert.deepEqual(calls[8].body, {
+		ids: [definitionId, secondDefinitionId],
+		isRequired: false,
+		groupId,
+	});
+
+	assert.equal(calls[9].method, 'DELETE');
+	assert.equal(
+		calls[9].url,
+		`https://hustleops.example.com/api/v1/custom-fields/definitions/${definitionId}?force=true`,
+	);
+
+	assert.equal(calls[10].method, 'POST');
+	assert.equal(
+		calls[10].url,
+		'https://hustleops.example.com/api/v1/custom-fields/definitions/bulk-delete',
+	);
+	assert.deepEqual(calls[10].body, { ids: [definitionId, secondDefinitionId], force: true });
+
+	assert.equal(calls[11].method, 'GET');
+	assert.equal(
+		calls[11].url,
+		`https://hustleops.example.com/api/v1/custom-fields/values/ALERT/${alertId}`,
+	);
+
+	assert.equal(calls[12].method, 'GET');
+	assert.equal(
+		calls[12].url,
+		`https://hustleops.example.com/api/v1/custom-fields/available/INCIDENT/${incidentId}`,
+	);
+
+	assert.equal(calls[13].method, 'POST');
+	assert.equal(calls[13].url, 'https://hustleops.example.com/api/v1/custom-fields/values/batch');
+	assert.deepEqual(calls[13].body, { entityType: 'OBSERVABLE', entityIds: [observableId] });
+
+	assert.equal(calls[14].method, 'PATCH');
+	assert.equal(
+		calls[14].url,
+		`https://hustleops.example.com/api/v1/custom-fields/values/KNOWLEDGE/${knowledgeId}`,
+	);
+	assert.deepEqual(calls[14].body, {
+		values: [{ fieldId: definitionId, value: '["pci","sox"]' }],
+	});
+});
+
+test('custom field safe selected updates merge with existing attached fields', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const updatedFieldId = '22222222-2222-4222-8222-222222222222';
+	const preservedFieldId = '33333333-3333-4333-8333-333333333333';
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'customField',
+				operation: 'updateSelectedValuesSafely',
+				entityType: 'INCIDENT',
+				entityId,
+				customFieldValues: JSON.stringify([{ fieldId: updatedFieldId, value: 'critical' }]),
+			},
+		],
+		(options) => {
+			if (options.method === 'GET') {
+				return {
+					values: [
+						{ fieldId: updatedFieldId, value: 'medium' },
+						{ fieldId: preservedFieldId, value: 'owner stays attached' },
+					],
+				};
+			}
+			return { updated: true };
+		},
+	);
+
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(
+		calls[0].url,
+		`https://hustleops.example.com/api/v1/custom-fields/values/INCIDENT/${entityId}`,
+	);
+	assert.equal(calls[1].method, 'PATCH');
+	assert.equal(
+		calls[1].url,
+		`https://hustleops.example.com/api/v1/custom-fields/values/INCIDENT/${entityId}`,
+	);
+	assert.deepEqual(calls[1].body, {
+		values: [
+			{ fieldId: updatedFieldId, value: 'critical' },
+			{ fieldId: preservedFieldId, value: 'owner stays attached' },
+		],
+	});
+	assert.deepEqual(result[0][0].json, { updated: true });
+});
+
+test('custom field updates reject immutable fieldType changes and oversized batches', async () => {
+	const definitionId = '11111111-1111-4111-8111-111111111111';
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'customField',
+				operation: 'updateDefinition',
+				customFieldDefinitionId: definitionId,
+				customFieldBody: '{"fieldType":"BOOLEAN"}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /fieldType is immutable/);
+	assert.equal(calls.length, 0);
+
+	const ids = Array.from(
+		{ length: 101 },
+		(_, index) => `${String(index).padStart(8, '0')}-1111-4111-8111-111111111111`,
+	);
+	const oversized = createContext(
+		[
+			{
+				resource: 'customField',
+				operation: 'batchGetValues',
+				entityType: 'ALERT',
+				entityIds: JSON.stringify(ids),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(
+		node.execute.call(oversized.context),
+		/Custom field batch cannot contain more than 100 IDs/,
+	);
+	assert.equal(oversized.calls.length, 0);
+});

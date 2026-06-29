@@ -8,7 +8,9 @@ import type {
 import { NodeOperationError } from 'n8n-workflow';
 import { HUSTLEOPS_API_KEY_HEADER } from './constants';
 
-export type HustleOpsRequestContext = IExecuteFunctions;
+export type HustleOpsRequestContext = Pick<IExecuteFunctions, 'getCredentials' | 'getNode'> & {
+	helpers: Pick<IExecuteFunctions['helpers'], 'httpRequest'>;
+};
 export type HustleOpsHttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 export type HustleOpsQueryParams = Record<string, string | number | boolean | null | undefined>;
 
@@ -287,6 +289,47 @@ export function parseJsonObject(
 		return parsed as IDataObject;
 	} catch {
 		throw new NodeOperationError(context.getNode(), `${fieldName} must be a valid JSON object.`, {
+			itemIndex,
+		});
+	}
+}
+
+export function parseJsonArray(
+	context: Pick<IExecuteFunctions, 'getNode'>,
+	value: unknown,
+	fieldName: string,
+	itemIndex: number,
+): unknown[] {
+	if (value === undefined || value === null || value === '') {
+		return [];
+	}
+
+	if (Array.isArray(value)) {
+		return value;
+	}
+
+	if (typeof value !== 'string') {
+		throw new NodeOperationError(context.getNode(), `${fieldName} must be a JSON array.`, {
+			itemIndex,
+		});
+	}
+
+	if (value.length > MAX_JSON_PARAMETER_CHARS) {
+		throw new NodeOperationError(
+			context.getNode(),
+			`${fieldName} is too large. Keep JSON parameters under ${MAX_JSON_PARAMETER_CHARS} characters.`,
+			{ itemIndex },
+		);
+	}
+
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (!Array.isArray(parsed)) {
+			throw new Error('not an array');
+		}
+		return parsed;
+	} catch {
+		throw new NodeOperationError(context.getNode(), `${fieldName} must be a valid JSON array.`, {
 			itemIndex,
 		});
 	}

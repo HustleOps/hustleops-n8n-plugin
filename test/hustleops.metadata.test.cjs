@@ -62,7 +62,7 @@ test('HustleOps node exposes the incident-response resources', () => {
 	]);
 	assert.deepEqual(
 		resource.options.map((option) => option.value),
-		['alert', 'incident', 'observable', 'knowledge', 'comment'],
+		['alert', 'incident', 'observable', 'knowledge', 'comment', 'tag', 'customField'],
 	);
 });
 
@@ -96,7 +96,7 @@ test('HustleOps node exposes live core API operations', () => {
 	assert.equal(operation.default, 'search');
 	assert.deepEqual(
 		operation.options.map((option) => option.value),
-		['search', 'count', 'get', 'create', 'update'],
+		['search', 'count', 'get', 'create', 'update', 'setTags', 'addTags', 'removeTag'],
 	);
 });
 
@@ -116,7 +116,13 @@ test('HustleOps node exposes live request fields', () => {
 	assert.equal(notice, undefined);
 
 	assert.equal(id.required, true);
-	assert.deepEqual(id.displayOptions.show.operation, ['get', 'update']);
+	assert.deepEqual(id.displayOptions.show.operation, [
+		'get',
+		'update',
+		'setTags',
+		'addTags',
+		'removeTag',
+	]);
 
 	assert.equal(body.type, 'json');
 	assert.equal(body.default, '{}');
@@ -185,8 +191,8 @@ test('HustleOps node exposes comment operations and fields', () => {
 
 	assert.ok(coreOperation, 'Expected core operation selector');
 	assert.deepEqual(coreOperation.displayOptions.show.resource, coreResourceValues);
-	assert.deepEqual(entityType.displayOptions.show.resource, ['comment']);
-	assert.deepEqual(entityId.displayOptions.show.resource, ['comment']);
+	assert.deepEqual(entityType.displayOptions.show.resource, ['comment', 'customField']);
+	assert.deepEqual(entityId.displayOptions.show.resource, ['comment', 'customField']);
 	assert.deepEqual(commentId.displayOptions.show.operation, [
 		'update',
 		'delete',
@@ -225,6 +231,100 @@ test('HustleOps node exposes comment operations and fields', () => {
 			`Expected ${coreFieldName} to be hidden for Comment`,
 		);
 	}
+});
+
+test('HustleOps node exposes tag and custom field operations and fields', () => {
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	const description = getNodeDescription();
+	const operationProperties = description.properties.filter(
+		(candidate) => candidate.name === 'operation',
+	);
+	const tagOperation = operationProperties.find((candidate) =>
+		candidate.displayOptions?.show?.resource?.includes('tag'),
+	);
+	const customFieldOperation = operationProperties.find((candidate) =>
+		candidate.displayOptions?.show?.resource?.includes('customField'),
+	);
+	const coreOperation = operationProperties.find((candidate) =>
+		candidate.displayOptions?.show?.resource?.includes('incident'),
+	);
+
+	assert.ok(tagOperation, 'Expected tag operation selector');
+	assert.deepEqual(
+		tagOperation.options.map((option) => option.value),
+		['list', 'search', 'create', 'updateColor', 'bulkUpdateColor', 'delete', 'bulkDelete'],
+	);
+	assert.ok(customFieldOperation, 'Expected custom field operation selector');
+	assert.deepEqual(
+		customFieldOperation.options.map((option) => option.value),
+		[
+			'listGroups',
+			'createGroup',
+			'updateGroup',
+			'deleteGroup',
+			'listDefinitions',
+			'searchDefinitions',
+			'createDefinition',
+			'updateDefinition',
+			'bulkUpdateDefinitions',
+			'deleteDefinition',
+			'bulkDeleteDefinitions',
+			'getValues',
+			'getAvailable',
+			'batchGetValues',
+			'replaceValues',
+			'updateSelectedValuesSafely',
+		],
+	);
+	assert.deepEqual(
+		coreOperation.options.map((option) => option.value),
+		['search', 'count', 'get', 'create', 'update', 'setTags', 'addTags', 'removeTag'],
+	);
+
+	const tagBody = getProperty(description, 'tagBody');
+	const tagValues = getProperty(description, 'tagValues');
+	const tagId = getProperty(description, 'tagId');
+	const force = getProperty(description, 'force');
+	const customFieldBody = getProperty(description, 'customFieldBody');
+	const customFieldValues = getProperty(description, 'customFieldValues');
+	const customFieldGroupId = getProperty(description, 'customFieldGroupId');
+	const customFieldDefinitionId = getProperty(description, 'customFieldDefinitionId');
+	const entityIds = getProperty(description, 'entityIds');
+
+	assert.equal(tagBody.type, 'json');
+	assert.deepEqual(tagBody.displayOptions.show.resource, ['tag']);
+	assert.equal(tagValues.type, 'json');
+	assert.deepEqual(tagValues.displayOptions.show.operation, ['setTags', 'addTags']);
+	assert.equal(tagId.type, 'options');
+	assert.deepEqual(tagId.displayOptions.show.operation, ['updateColor', 'delete', 'removeTag']);
+	assert.deepEqual(force.displayOptions.show.operation, [
+		'delete',
+		'bulkDelete',
+		'deleteGroup',
+		'deleteDefinition',
+		'bulkDeleteDefinitions',
+	]);
+
+	assert.equal(customFieldBody.type, 'json');
+	assert.deepEqual(customFieldBody.displayOptions.show.resource, ['customField']);
+	assert.equal(customFieldValues.type, 'json');
+	assert.deepEqual(customFieldValues.displayOptions.show.operation, [
+		'replaceValues',
+		'updateSelectedValuesSafely',
+	]);
+	assert.deepEqual(customFieldGroupId.displayOptions.show.operation, [
+		'updateGroup',
+		'deleteGroup',
+	]);
+	assert.equal(customFieldDefinitionId.type, 'options');
+	assert.deepEqual(customFieldDefinitionId.displayOptions.show.operation, [
+		'updateDefinition',
+		'deleteDefinition',
+	]);
+	assert.deepEqual(entityIds.displayOptions.show.operation, ['batchGetValues']);
+	assert.equal(typeof node.methods.loadOptions.getTagOptions, 'function');
+	assert.equal(typeof node.methods.loadOptions.getCustomFieldDefinitionOptions, 'function');
 });
 
 test('HustleOps node codex metadata is present', () => {
@@ -297,6 +397,13 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Get Unread Count/i);
 	assert.match(readme, /Toggle Reaction/i);
 	assert.match(readme, /Toggle Pin/i);
+	assert.match(readme, /Tag/i);
+	assert.match(readme, /Set Tags/i);
+	assert.match(readme, /Add Tags/i);
+	assert.match(readme, /Remove Tag/i);
+	assert.match(readme, /Custom Field/i);
+	assert.match(readme, /Replace Values/i);
+	assert.match(readme, /Update Selected Values Safely/i);
 	assert.match(readme, /COMMENTS:VIEW/i);
 	assert.match(readme, /COMMENTS:CREATE/i);
 	assert.match(readme, /COMMENTS:UPDATE/i);
