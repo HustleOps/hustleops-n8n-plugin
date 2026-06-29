@@ -163,6 +163,83 @@ test('hustleOpsApiRequest redacts secrets from surfaced errors', async () => {
 	});
 });
 
+test('hustleOpsApiRequest appends encoded query parameters and omits empty values', async () => {
+	const { hustleOpsApiRequest } = loadHelpers();
+	const calls = [];
+	const context = {
+		getNode: () => ({ name: 'HustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		helpers: {
+			httpRequest: async (options) => {
+				calls.push(options);
+				return { items: [], nextCursor: null };
+			},
+		},
+	};
+
+	await hustleOpsApiRequest(context, 'GET', '/comments', undefined, 0, {
+		entityType: 'ALERT',
+		entityId: '11111111-1111-4111-8111-111111111111',
+		q: 'failed login',
+		cursor: '',
+		take: 50,
+	});
+
+	assert.equal(
+		calls[0].url,
+		'https://hustleops.example.com/api/v1/comments?entityType=ALERT&entityId=11111111-1111-4111-8111-111111111111&q=failed+login&take=50',
+	);
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(calls[0].body, undefined);
+	assert.equal(calls[0].headers['Content-Type'], undefined);
+});
+
+test('hustleOpsApiRequest redacts query strings from surfaced API errors', async () => {
+	const { hustleOpsApiRequest } = loadHelpers();
+	const context = {
+		getNode: () => ({ name: 'HustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		helpers: {
+			httpRequest: async () => {
+				const error = new Error(
+					'GET /api/v1/comments/search?entityType=ALERT&q=secret-search-text failed',
+				);
+				error.response = {
+					statusCode: 400,
+					body: {
+						statusCode: 400,
+						message: 'Invalid search',
+						path: '/api/v1/comments/search?entityType=ALERT&q=secret-search-text',
+						requestId: 'req-comment-search',
+					},
+				};
+				throw error;
+			},
+		},
+	};
+
+	await assert.rejects(
+		hustleOpsApiRequest(context, 'GET', '/comments/search', undefined, 0, {
+			entityType: 'ALERT',
+			entityId: '11111111-1111-4111-8111-111111111111',
+			q: 'secret-search-text',
+		}),
+		(error) => {
+			assert.match(error.message, /HustleOps API error 400/);
+			assert.match(error.message, /requestId=req-comment-search/);
+			assert.match(error.message, /\/api\/v1\/comments\/search\?\[REDACTED\]/);
+			assert.doesNotMatch(error.message, /secret-search-text/);
+			return true;
+		},
+	);
+});
+
 test('safePathSegment accepts UUIDs and rejects unsafe path segments', () => {
 	const { safePathSegment } = loadHelpers();
 	const id = '11111111-1111-4111-8111-111111111111';
@@ -520,6 +597,135 @@ test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and
 				excludeIds: ['../users'],
 			}),
 		/Alert search excludeIds must contain valid UUIDs/,
+	);
+});
+
+test('comment helpers build entity queries and sanitize comment bodies', () => {
+	const {
+		buildCommentEntityQuery,
+		buildCommentSearchQuery,
+		parseCommentMaxResults,
+		sanitizeCreateComment,
+		sanitizeUpdateComment,
+		sanitizeToggleReaction,
+	} = require('../dist/nodes/HustleOps/commentDefinitions.js');
+	const context = { getNode: () => ({ name: 'HustleOps' }) };
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const parentId = '22222222-2222-4222-8222-222222222222';
+	const attachmentId = '33333333-3333-4333-8333-333333333333';
+
+	assert.deepEqual(
+		buildCommentEntityQuery(
+			context,
+			{ entityType: 'ALERT', entityId, take: 25, cursor: parentId },
+			0,
+		),
+		{ entityType: 'ALERT', entityId, take: 25, cursor: parentId },
+	);
+
+	assert.deepEqual(
+		sanitizeCreateComment(
+			context,
+			{
+				entityType: 'INCIDENT',
+				entityId,
+			},
+			{
+				content: 'Escalating for review',
+				parentId,
+				attachmentIds: [attachmentId],
+			},
+			0,
+		),
+		{
+			entityType: 'INCIDENT',
+			entityId,
+			content: 'Escalating for review',
+			parentId,
+			attachmentIds: [attachmentId],
+		},
+	);
+
+	assert.deepEqual(sanitizeUpdateComment(context, { content: 'Updated note' }, 0), {
+		content: 'Updated note',
+	});
+	assert.deepEqual(sanitizeToggleReaction(context, { emoji: 'OK' }, 0), { emoji: 'OK' });
+	assert.deepEqual(
+		buildCommentSearchQuery(context, { entityType: 'INCIDENT', entityId, q: 'timeline' }, 0),
+		{ entityType: 'INCIDENT', entityId, q: 'timeline' },
+	);
+	assert.equal(parseCommentMaxResults(context, 25, 0), 25);
+});
+
+test('comment helpers reject invalid comment inputs before requests', () => {
+	const {
+		buildCommentEntityQuery,
+		buildCommentSearchQuery,
+		sanitizeCreateComment,
+		sanitizeUpdateComment,
+		sanitizeToggleReaction,
+	} = require('../dist/nodes/HustleOps/commentDefinitions.js');
+	const context = { getNode: () => ({ name: 'HustleOps' }) };
+	const entityId = '11111111-1111-4111-8111-111111111111';
+
+	assert.throws(
+		() => buildCommentEntityQuery(context, { entityType: 'USER', entityId }, 0),
+		/Comment entity type must be one of: ALERT, INCIDENT, OBSERVABLE, KNOWLEDGE/,
+	);
+	assert.throws(
+		() => buildCommentEntityQuery(context, { entityType: 'ALERT', entityId, take: 101 }, 0),
+		/Comment take must be between 1 and 100/,
+	);
+	assert.throws(
+		() => sanitizeCreateComment(context, { entityType: 'ALERT', entityId }, {}, 0),
+		/Comment create requires content or attachmentIds/,
+	);
+	assert.throws(
+		() =>
+			sanitizeCreateComment(
+				context,
+				{
+					entityType: 'ALERT',
+					entityId,
+				},
+				{
+					attachmentIds: [
+						'11111111-1111-4111-8111-111111111111',
+						'22222222-2222-4222-8222-222222222222',
+						'33333333-3333-4333-8333-333333333333',
+						'44444444-4444-4444-8444-444444444444',
+					],
+				},
+				0,
+			),
+		/Comment attachmentIds cannot contain more than 3 IDs/,
+	);
+	assert.throws(
+		() => sanitizeUpdateComment(context, { content: '' }, 0),
+		/Comment content is required/,
+	);
+	assert.throws(
+		() => sanitizeToggleReaction(context, { emoji: '12345678901234567' }, 0),
+		/Comment emoji cannot exceed 16 characters/,
+	);
+	assert.throws(
+		() =>
+			sanitizeCreateComment(
+				context,
+				{ entityType: 'ALERT', entityId },
+				{ content: 'x', userId: 'u1' },
+				0,
+			),
+		/Unsupported Comment create body field: userId/,
+	);
+	assert.throws(
+		() => sanitizeUpdateComment(context, { content: 'x', entityId }, 0),
+		/Unsupported Comment update field: entityId/,
+	);
+	assert.throws(
+		() =>
+			buildCommentSearchQuery(context, { entityType: 'ALERT', entityId, q: 'x'.repeat(501) }, 0),
+		/Comment search query cannot exceed 500 characters/,
 	);
 });
 

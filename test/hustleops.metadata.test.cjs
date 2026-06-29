@@ -62,7 +62,7 @@ test('HustleOps node exposes the incident-response resources', () => {
 	]);
 	assert.deepEqual(
 		resource.options.map((option) => option.value),
-		['alert', 'incident', 'observable', 'knowledge'],
+		['alert', 'incident', 'observable', 'knowledge', 'comment'],
 	);
 });
 
@@ -141,6 +141,92 @@ test('HustleOps node exposes live request fields', () => {
 	assert.deepEqual(includePaginationMetadata.displayOptions.show.operation, ['search']);
 });
 
+test('HustleOps node exposes comment operations and fields', () => {
+	const description = getNodeDescription();
+	const operationProperties = description.properties.filter(
+		(candidate) => candidate.name === 'operation',
+	);
+	const commentOperation = operationProperties.find((candidate) =>
+		candidate.displayOptions?.show?.resource?.includes('comment'),
+	);
+
+	assert.ok(commentOperation, 'Expected comment operation selector');
+	assert.deepEqual(
+		commentOperation.options.map((option) => option.value),
+		[
+			'list',
+			'search',
+			'unreadCount',
+			'create',
+			'markRead',
+			'update',
+			'delete',
+			'toggleReaction',
+			'togglePin',
+		],
+	);
+
+	const entityType = getProperty(description, 'entityType');
+	const entityId = getProperty(description, 'entityId');
+	const commentId = getProperty(description, 'commentId');
+	const take = getProperty(description, 'take');
+	const cursor = getProperty(description, 'cursor');
+	const q = getProperty(description, 'q');
+	const maxResults = getProperty(description, 'maxResults');
+	const commentBody = getProperty(description, 'commentBody');
+	const includeCommentPaginationMetadata = getProperty(
+		description,
+		'includeCommentPaginationMetadata',
+	);
+	const coreOperation = operationProperties.find((candidate) =>
+		candidate.displayOptions?.show?.resource?.includes('incident'),
+	);
+	const coreResourceValues = ['alert', 'incident', 'observable', 'knowledge'];
+
+	assert.ok(coreOperation, 'Expected core operation selector');
+	assert.deepEqual(coreOperation.displayOptions.show.resource, coreResourceValues);
+	assert.deepEqual(entityType.displayOptions.show.resource, ['comment']);
+	assert.deepEqual(entityId.displayOptions.show.resource, ['comment']);
+	assert.deepEqual(commentId.displayOptions.show.operation, [
+		'update',
+		'delete',
+		'toggleReaction',
+		'togglePin',
+	]);
+	assert.equal(take.default, 50);
+	assert.equal(take.typeOptions.minValue, 1);
+	assert.equal(take.typeOptions.maxValue, 100);
+	assert.deepEqual(cursor.displayOptions.show.operation, ['list']);
+	assert.deepEqual(q.displayOptions.show.operation, ['search']);
+	assert.equal(maxResults.default, 100);
+	assert.equal(maxResults.typeOptions.minValue, 1);
+	assert.equal(maxResults.typeOptions.maxValue, 100);
+	assert.deepEqual(maxResults.displayOptions.show.operation, ['search']);
+	assert.equal(commentBody.type, 'json');
+	assert.deepEqual(commentBody.displayOptions.show.operation, [
+		'create',
+		'update',
+		'toggleReaction',
+	]);
+	assert.deepEqual(includeCommentPaginationMetadata.displayOptions.show.operation, ['list']);
+
+	for (const coreFieldName of [
+		'id',
+		'body',
+		'searchBody',
+		'returnAll',
+		'maxItems',
+		'maxPages',
+		'includePaginationMetadata',
+	]) {
+		assert.deepEqual(
+			getProperty(description, coreFieldName).displayOptions.show.resource,
+			coreResourceValues,
+			`Expected ${coreFieldName} to be hidden for Comment`,
+		);
+	}
+});
+
 test('HustleOps node codex metadata is present', () => {
 	const codex = require('../dist/nodes/HustleOps/HustleOps.node.json');
 
@@ -206,7 +292,24 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /sourceRef/i);
 	assert.match(readme, /firstSeen/i);
 	assert.match(readme, /tlp/i);
-	assert.match(readme, /Comments and attachments are not included/i);
+	assert.match(readme, /Comment/i);
+	assert.match(readme, /List/i);
+	assert.match(readme, /Get Unread Count/i);
+	assert.match(readme, /Toggle Reaction/i);
+	assert.match(readme, /Toggle Pin/i);
+	assert.match(readme, /COMMENTS:VIEW/i);
+	assert.match(readme, /COMMENTS:CREATE/i);
+	assert.match(readme, /COMMENTS:UPDATE/i);
+	assert.match(readme, /COMMENTS:DELETE/i);
+	assert.match(readme, /Entity Type/i);
+	assert.match(readme, /Entity ID/i);
+	assert.match(readme, /Comment ID/i);
+	assert.match(readme, /Search Query/i);
+	assert.match(readme, /Max Results/i);
+	assert.match(readme, /Include Cursor Metadata/i);
+	assert.match(readme, /one item per comment/i);
+	assert.match(readme, /\{ "unreadCount": number \}/i);
+	assert.match(readme, /Attachment upload and download are not included/i);
 	assert.doesNotMatch(readme, /metadata-first/i);
 	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
 });

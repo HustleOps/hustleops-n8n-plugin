@@ -10,6 +10,7 @@ import { HUSTLEOPS_API_KEY_HEADER } from './constants';
 
 export type HustleOpsRequestContext = IExecuteFunctions;
 export type HustleOpsHttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+export type HustleOpsQueryParams = Record<string, string | number | boolean | null | undefined>;
 
 type HustleOpsCredentials = {
 	baseUrl: string;
@@ -26,6 +27,7 @@ type HustleOpsApiClient = {
 		method: HustleOpsHttpMethod,
 		path: string,
 		body?: IDataObject,
+		query?: HustleOpsQueryParams,
 	) => Promise<T>;
 	requestEachPage: (
 		path: string,
@@ -104,12 +106,40 @@ export function normalizeBaseUrl(input: string): string {
 	return url.toString().replace(/\/$/, '');
 }
 
-export function safePathSegment(value: string, label: string): string {
-	const trimmed = value.trim();
-	if (!UUID_PATTERN.test(trimmed)) {
+export function isUuid(value: unknown): value is string {
+	return typeof value === 'string' && UUID_PATTERN.test(value.trim());
+}
+
+export function assertUuid(value: unknown, label: string): string {
+	if (!isUuid(value)) {
 		throw new Error(`${label} must be a valid UUID.`);
 	}
-	return encodeURIComponent(trimmed);
+	return value.trim();
+}
+
+export function parseIntegerInRange(
+	value: unknown,
+	label: string,
+	minimum: number,
+	maximum: number,
+	defaultValue?: number,
+): number {
+	const numericValue =
+		typeof value === 'number'
+			? value
+			: typeof value === 'string' && value.trim() !== ''
+				? Number(value)
+				: (defaultValue ?? Number.NaN);
+
+	if (!Number.isInteger(numericValue) || numericValue < minimum || numericValue > maximum) {
+		throw new Error(`${label} must be between ${minimum} and ${maximum}.`);
+	}
+
+	return numericValue;
+}
+
+export function safePathSegment(value: string, label: string): string {
+	return encodeURIComponent(assertUuid(value, label));
 }
 
 export function compactObject<T>(value: T): T {
@@ -148,8 +178,12 @@ function getErrorBody(error: unknown): IDataObject {
 	return {};
 }
 
+function redactUrlQuery(value: string): string {
+	return value.replace(/(\/api\/v\d+\/[^?\s]+)\?[^,\s}]*/g, '$1?[REDACTED]');
+}
+
 export function redactSensitiveText(value: string): string {
-	return value
+	return redactUrlQuery(value)
 		.replace(/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Authorization: Bearer [REDACTED]')
 		.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
 		.replace(/x-api-key\s*(?:[:=]|\s)\s*[A-Za-z0-9._~+/=-]+/gi, 'x-api-key [REDACTED]')
@@ -169,7 +203,7 @@ function formatApiError(error: unknown): string {
 				? error.message
 				: String(error);
 	const requestId = typeof body.requestId === 'string' ? ` requestId=${body.requestId}` : '';
-	const path = typeof body.path === 'string' ? ` path=${body.path}` : '';
+	const path = typeof body.path === 'string' ? ` path=${redactUrlQuery(body.path)}` : '';
 	const status = typeof statusCode === 'number' ? ` ${statusCode}` : '';
 
 	return redactSensitiveText(`HustleOps API error${status}: ${message}${requestId}${path}`);
@@ -297,17 +331,30 @@ export async function createHustleOpsApiClient(
 	const credentials = (await context.getCredentials('hustleOpsApi')) as HustleOpsCredentials;
 	const baseUrl = normalizeBaseUrl(credentials.baseUrl);
 
+	function buildRequestUrl(path: string, query?: HustleOpsQueryParams): string {
+		const url = new URL(`${baseUrl}${path}`);
+
+		for (const [key, value] of Object.entries(query ?? {})) {
+			if (value !== undefined && value !== null && value !== '') {
+				url.searchParams.set(key, String(value));
+			}
+		}
+
+		return url.toString();
+	}
+
 	const request = async <T = IDataObject>(
 		method: HustleOpsHttpMethod,
 		path: string,
 		body?: IDataObject,
+		query?: HustleOpsQueryParams,
 	): Promise<T> => {
 		const hasJsonBody = body !== undefined;
 
 		try {
 			return (await context.helpers.httpRequest({
 				method,
-				url: `${baseUrl}${path}`,
+				url: buildRequestUrl(path, query),
 				headers: {
 					[HUSTLEOPS_API_KEY_HEADER]: credentials.apiKey,
 					Accept: 'application/json',
@@ -377,9 +424,10 @@ export async function hustleOpsApiRequest<T = IDataObject>(
 	path: string,
 	body: IDataObject | undefined,
 	itemIndex: number,
+	query?: HustleOpsQueryParams,
 ): Promise<T> {
 	const client = await createHustleOpsApiClient(context, itemIndex);
-	return client.request<T>(method, path, body);
+	return client.request<T>(method, path, body, query);
 }
 
 export async function hustleOpsApiRequestEachPage(

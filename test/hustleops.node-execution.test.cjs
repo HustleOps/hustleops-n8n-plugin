@@ -278,3 +278,312 @@ test('unsafe IDs fail before an API request is sent', async () => {
 	await assert.rejects(node.execute.call(context), /Alert ID must be a valid UUID/);
 	assert.equal(calls.length, 0);
 });
+
+test('comment list calls list endpoint and returns one item per comment by default', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'list',
+				entityType: 'ALERT',
+				entityId,
+				take: 2,
+				cursor: '',
+				includeCommentPaginationMetadata: false,
+			},
+		],
+		() => ({
+			items: [{ id: 'comment-1' }, { id: 'comment-2' }],
+			nextCursor: '22222222-2222-4222-8222-222222222222',
+		}),
+	);
+
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(
+		calls[0].url,
+		`https://hustleops.example.com/api/v1/comments?entityType=ALERT&entityId=${entityId}&take=2`,
+	);
+	assert.deepEqual(
+		result[0].map((item) => item.json),
+		[{ id: 'comment-1' }, { id: 'comment-2' }],
+	);
+});
+
+test('comment list can return raw cursor metadata', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const response = {
+		items: [{ id: 'comment-1' }],
+		nextCursor: '22222222-2222-4222-8222-222222222222',
+	};
+	const { result } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'list',
+				entityType: 'ALERT',
+				entityId,
+				take: 1,
+				includeCommentPaginationMetadata: true,
+			},
+		],
+		() => response,
+	);
+
+	assert.deepEqual(result[0][0].json, response);
+});
+
+test('comment search calls search endpoint and returns comments', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'search',
+				entityType: 'INCIDENT',
+				entityId,
+				q: 'containment',
+				maxResults: 1,
+			},
+		],
+		() => [
+			{ id: 'comment-1', content: 'containment started' },
+			{ id: 'comment-2', content: 'containment completed' },
+		],
+	);
+
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(
+		calls[0].url,
+		`https://hustleops.example.com/api/v1/comments/search?entityType=INCIDENT&entityId=${entityId}&q=containment`,
+	);
+	assert.deepEqual(
+		result[0].map((item) => item.json),
+		[{ id: 'comment-1', content: 'containment started' }],
+	);
+});
+
+test('comment unread count wraps numeric response', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'unreadCount',
+				entityType: 'KNOWLEDGE',
+				entityId,
+			},
+		],
+		() => 3,
+	);
+
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(
+		calls[0].url,
+		`https://hustleops.example.com/api/v1/comments/unread-count?entityType=KNOWLEDGE&entityId=${entityId}`,
+	);
+	assert.deepEqual(result[0][0].json, { unreadCount: 3 });
+});
+
+test('comment create posts sanitized body', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'create',
+				entityType: 'OBSERVABLE',
+				entityId,
+				commentBody: JSON.stringify({
+					content: 'Observed in proxy logs',
+				}),
+			},
+		],
+		() => ({ id: 'comment-1', autoTransitioned: false }),
+	);
+
+	assert.equal(calls[0].method, 'POST');
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/comments');
+	assert.deepEqual(calls[0].body, {
+		entityType: 'OBSERVABLE',
+		entityId,
+		content: 'Observed in proxy logs',
+	});
+	assert.deepEqual(result[0][0].json, { id: 'comment-1', autoTransitioned: false });
+});
+
+test('comment mark read posts entity body and returns success object', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const { result, calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'markRead',
+				entityType: 'INCIDENT',
+				entityId,
+			},
+		],
+		() => undefined,
+	);
+
+	assert.equal(calls[0].method, 'POST');
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/comments/read');
+	assert.deepEqual(calls[0].body, { entityType: 'INCIDENT', entityId });
+	assert.deepEqual(result[0][0].json, { success: true, entityType: 'INCIDENT', entityId });
+});
+
+test('comment update patches comment content', async () => {
+	const commentId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'update',
+				commentId,
+				commentBody: '{"content":"Updated containment note"}',
+			},
+		],
+		() => ({ id: commentId, content: 'Updated containment note' }),
+	);
+
+	assert.equal(calls[0].method, 'PATCH');
+	assert.equal(calls[0].url, `https://hustleops.example.com/api/v1/comments/${commentId}`);
+	assert.deepEqual(calls[0].body, { content: 'Updated containment note' });
+});
+
+test('comment delete calls comment detail endpoint', async () => {
+	const commentId = '22222222-2222-4222-8222-222222222222';
+	const { result, calls } = await execute(
+		[{ resource: 'comment', operation: 'delete', commentId }],
+		() => ({ id: commentId, entityType: 'ALERT', entityId: 'entity-id' }),
+	);
+
+	assert.equal(calls[0].method, 'DELETE');
+	assert.equal(calls[0].url, `https://hustleops.example.com/api/v1/comments/${commentId}`);
+	assert.deepEqual(result[0][0].json, {
+		id: commentId,
+		entityType: 'ALERT',
+		entityId: 'entity-id',
+	});
+});
+
+test('comment toggle reaction posts emoji body', async () => {
+	const commentId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'toggleReaction',
+				commentId,
+				commentBody: '{"emoji":"OK"}',
+			},
+		],
+		() => ({ id: commentId, reactions: [{ emoji: 'OK', count: 1, users: [] }] }),
+	);
+
+	assert.equal(calls[0].method, 'POST');
+	assert.equal(
+		calls[0].url,
+		`https://hustleops.example.com/api/v1/comments/${commentId}/reactions`,
+	);
+	assert.deepEqual(calls[0].body, { emoji: 'OK' });
+});
+
+test('comment toggle pin patches pin endpoint', async () => {
+	const commentId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[{ resource: 'comment', operation: 'togglePin', commentId }],
+		() => ({ id: commentId, isPinned: true }),
+	);
+
+	assert.equal(calls[0].method, 'PATCH');
+	assert.equal(calls[0].url, `https://hustleops.example.com/api/v1/comments/${commentId}/pin`);
+	assert.equal(calls[0].body, undefined);
+});
+
+test('comment create rejects empty body before an API request is sent', async () => {
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'comment',
+				operation: 'create',
+				entityType: 'ALERT',
+				entityId: '11111111-1111-4111-8111-111111111111',
+				commentBody: '{}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(context),
+		/Comment create requires content or attachmentIds/,
+	);
+	assert.equal(calls.length, 0);
+});
+
+test('comment create rejects entity scope inside Comment Body', async () => {
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'comment',
+				operation: 'create',
+				entityType: 'ALERT',
+				entityId: '11111111-1111-4111-8111-111111111111',
+				commentBody:
+					'{"entityType":"INCIDENT","entityId":"22222222-2222-4222-8222-222222222222","content":"wrong target"}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(context),
+		/Unsupported Comment create body field: entityType/,
+	);
+	assert.equal(calls.length, 0);
+});
+
+test('comment operations reject unsafe comment IDs before an API request is sent', async () => {
+	const { context, calls } = createContext(
+		[{ resource: 'comment', operation: 'delete', commentId: '../users' }],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Comment ID must be a valid UUID/);
+	assert.equal(calls.length, 0);
+});
+
+test('comment operations reject unsupported body fields before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'comment',
+				operation: 'update',
+				commentId: '22222222-2222-4222-8222-222222222222',
+				commentBody: '{"content":"Updated note","entityId":"11111111-1111-4111-8111-111111111111"}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
+	};
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Unsupported Comment update field: entityId/);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
+});
