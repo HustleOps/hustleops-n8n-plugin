@@ -18,7 +18,11 @@ The current package supports live HustleOps API requests for core alert, inciden
 
 Search operations call HustleOps `/search` endpoints with a JSON Search Body. Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
 
-Create and Update operations accept JSON bodies. Unsupported fields fail before a request is sent because the HustleOps API rejects unknown DTO fields.
+Create and Update operations expose common DTO fields directly in the node. Required create fields appear as normal n8n fields. Optional create fields are available under `Additional Fields`, and update payload fields are available under `Fields to Update`.
+
+Use `Additional JSON` only for advanced supported fields or intentional overrides. `Additional JSON` is merged after structured fields, so duplicate keys in `Additional JSON` win. Unsupported fields still fail before the API request is sent.
+
+Workflows saved with the old `Body` field continue to run through a hidden legacy fallback when no structured fields or `Additional JSON` values are set. New workflows should use structured fields and `Additional JSON`.
 
 ## Tag Operations
 
@@ -84,7 +88,20 @@ API keys act as the user who owns the key, so role and permission checks still a
 
 ## Create Examples
 
-Alert:
+Set these values through node fields rather than a generic Body editor. The JSON below shows the API payload produced from the structured fields.
+
+Alert field values:
+
+| n8n field     | Value                      |
+| ------------- | -------------------------- |
+| `Name`        | `Suspicious login`         |
+| `Description` | `Okta anomaly`             |
+| `Severity`    | `HIGH`                     |
+| `TLP`         | `AMBER`                    |
+| `Source`      | `okta`                     |
+| `Type`        | `identity`                 |
+| `Source Ref`  | `evt_12345`                |
+| `Detected At` | `2026-06-28T12:00:00.000Z` |
 
 ```json
 {
@@ -99,7 +116,15 @@ Alert:
 }
 ```
 
-Incident:
+Incident field values:
+
+| n8n field     | Value                                               |
+| ------------- | --------------------------------------------------- |
+| `Name`        | `Credential theft investigation`                    |
+| `Description` | `Coordinated response for suspicious Okta activity` |
+| `Severity`    | `HIGH`                                              |
+| `TLP`         | `AMBER`                                             |
+| `Category`    | `identity`                                          |
 
 ```json
 {
@@ -111,7 +136,16 @@ Incident:
 }
 ```
 
-Observable:
+Observable field values:
+
+| n8n field      | Value                      |
+| -------------- | -------------------------- |
+| `Value`        | `198.51.100.10`            |
+| `Type`         | `ip`                       |
+| `Threat Level` | `SUSPICIOUS`               |
+| `TLP`          | `AMBER`                    |
+| `First Seen`   | `2026-06-28T11:30:00.000Z` |
+| `Last Seen`    | `2026-06-28T12:00:00.000Z` |
 
 ```json
 {
@@ -124,7 +158,14 @@ Observable:
 }
 ```
 
-Knowledge:
+Knowledge field values:
+
+| n8n field     | Value                                      |
+| ------------- | ------------------------------------------ |
+| `Value`       | `Containment runbook`                      |
+| `Type`        | `runbook`                                  |
+| `TLP`         | `AMBER`                                    |
+| `Description` | `Steps for disabling compromised accounts` |
 
 ```json
 {
@@ -134,6 +175,14 @@ Knowledge:
 	"description": "Steps for disabling compromised accounts"
 }
 ```
+
+## Update Fields
+
+Update operations keep `ID` as a required field and put editable payload values under `Fields to Update`.
+
+For example, updating an Observable can set `Threat Level`, `Criticality`, and `Version` under `Fields to Update`. If `Additional JSON` also contains `criticality`, the value from `Additional JSON` is sent.
+
+To clear a supported nullable field, set it to `null` in `Additional JSON`, such as `{ "summary": null }`. Blank structured update fields are omitted.
 
 ## Search Pagination
 

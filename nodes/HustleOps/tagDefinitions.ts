@@ -221,28 +221,50 @@ function uuidArray(
 	});
 }
 
-export function parseEntityTagValues(
+type ParseTagValuesOptions = {
+	allowEmpty?: boolean;
+	emptyMessage?: string;
+};
+
+export function parseTagValues(
 	context: ValidationContext,
 	value: unknown,
-	operationLabel: 'Set Tags' | 'Add Tags',
+	label: string,
 	itemIndex: number,
+	options: ParseTagValuesOptions = {},
 ): string[] {
-	const values = parseJsonArray(context, value, 'Tag Values', itemIndex).map((tag) =>
-		tagValue(context, tag, itemIndex),
-	);
+	const rawValues = parseJsonArray(context, value, label, itemIndex);
 
-	if (values.length > MAX_TAGS_PER_ENTITY) {
+	if (rawValues.length > MAX_TAGS_PER_ENTITY) {
 		throw nodeError(
 			context,
 			`Entity tags cannot contain more than ${MAX_TAGS_PER_ENTITY} values.`,
 			itemIndex,
 		);
 	}
-	if (operationLabel === 'Add Tags' && values.length === 0) {
-		throw nodeError(context, 'Add Tags requires at least one tag value.', itemIndex);
+
+	const values = rawValues.map((tag) => tagValue(context, tag, itemIndex));
+	if (!options.allowEmpty && values.length === 0) {
+		throw nodeError(
+			context,
+			options.emptyMessage ?? `${label} requires at least one tag value.`,
+			itemIndex,
+		);
 	}
 
 	return values;
+}
+
+export function parseEntityTagValues(
+	context: ValidationContext,
+	value: unknown,
+	operationLabel: 'Set Tags' | 'Add Tags',
+	itemIndex: number,
+): string[] {
+	return parseTagValues(context, value, 'Tag Values', itemIndex, {
+		allowEmpty: operationLabel === 'Set Tags',
+		emptyMessage: 'Add Tags requires at least one tag value.',
+	});
 }
 
 export function sanitizeTagBody(

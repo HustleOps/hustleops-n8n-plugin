@@ -35,6 +35,14 @@ async function execute(parametersByItem, httpResponseFactory) {
 	return { result, calls };
 }
 
+const {
+	ADDITIONAL_JSON_PARAMETER,
+	LEGACY_BODY_PARAMETER,
+	createAdditionalFieldsParameterName: createAdditionalFieldsName,
+	structuredFieldParameterName: structuredFieldName,
+	updateFieldsParameterName: updateFieldsName,
+} = require('../dist/nodes/HustleOps/structuredCoreFields.js');
+
 test('get calls the resource detail endpoint', async () => {
 	const alertId = '11111111-1111-4111-8111-111111111111';
 	const { result, calls } = await execute(
@@ -49,21 +57,22 @@ test('get calls the resource detail endpoint', async () => {
 	assert.deepEqual(result[0][0].pairedItem, { item: 0 });
 });
 
-test('create sanitizes body and posts to the resource endpoint', async () => {
+test('create builds structured body and posts to the resource endpoint', async () => {
 	const { result, calls } = await execute(
 		[
 			{
 				resource: 'incident',
 				operation: 'create',
-				body: JSON.stringify({
-					name: 'Credential theft',
-					description: 'Okta alerts',
-					severity: 'HIGH',
-					tlp: 'AMBER',
-					category: 'identity',
-					status: undefined,
-					tags: ['okta'],
-				}),
+				[structuredFieldName('incident', 'create', 'name')]: 'Credential theft',
+				[structuredFieldName('incident', 'create', 'description')]: 'Okta alerts',
+				[structuredFieldName('incident', 'create', 'severity')]: 'HIGH',
+				[structuredFieldName('incident', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('incident', 'create', 'category')]: 'identity',
+				[createAdditionalFieldsName('incident')]: {
+					status: '',
+					tags: '["okta"]',
+				},
+				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: 'incident-id-1', displayId: 'INC-1' }),
@@ -82,7 +91,7 @@ test('create sanitizes body and posts to the resource endpoint', async () => {
 	assert.deepEqual(result[0][0].json, { id: 'incident-id-1', displayId: 'INC-1' });
 });
 
-test('update sanitizes body and patches the resource detail endpoint', async () => {
+test('update builds structured body and patches the resource detail endpoint', async () => {
 	const observableId = '22222222-2222-4222-8222-222222222222';
 	const { calls } = await execute(
 		[
@@ -90,11 +99,12 @@ test('update sanitizes body and patches the resource detail endpoint', async () 
 				resource: 'observable',
 				operation: 'update',
 				id: observableId,
-				body: JSON.stringify({
+				[updateFieldsName('observable')]: {
 					threatLevel: 'MALICIOUS',
 					criticality: 'HIGH',
 					version: 4,
-				}),
+				},
+				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: observableId, threatLevel: 'MALICIOUS' }),
@@ -107,6 +117,327 @@ test('update sanitizes body and patches the resource detail endpoint', async () 
 		criticality: 'HIGH',
 		version: 4,
 	});
+});
+
+test('additional JSON merges after structured create fields and overrides duplicate keys', async () => {
+	const { calls } = await execute(
+		[
+			{
+				resource: 'alert',
+				operation: 'create',
+				[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
+				[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
+				[structuredFieldName('alert', 'create', 'severity')]: 'LOW',
+				[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('alert', 'create', 'source')]: 'okta',
+				[structuredFieldName('alert', 'create', 'type')]: 'identity',
+				[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
+				[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
+				[createAdditionalFieldsName('alert')]: {},
+				[ADDITIONAL_JSON_PARAMETER]: JSON.stringify({
+					severity: 'HIGH',
+					alertRefUrl: 'https://okta.example.com/events/evt_12345',
+				}),
+			},
+		],
+		() => ({ id: 'alert-id-1', displayId: 'ALT-1' }),
+	);
+
+	assert.deepEqual(calls[0].body, {
+		name: 'Suspicious login',
+		description: 'Okta anomaly',
+		severity: 'HIGH',
+		tlp: 'AMBER',
+		source: 'okta',
+		type: 'identity',
+		sourceRef: 'evt_12345',
+		detectedAt: '2026-06-28T12:00:00.000Z',
+		alertRefUrl: 'https://okta.example.com/events/evt_12345',
+	});
+});
+
+test('empty optional structured create fields are omitted', async () => {
+	const { calls } = await execute(
+		[
+			{
+				resource: 'incident',
+				operation: 'create',
+				[structuredFieldName('incident', 'create', 'name')]: 'Credential theft',
+				[structuredFieldName('incident', 'create', 'description')]: 'Okta alerts',
+				[structuredFieldName('incident', 'create', 'severity')]: 'HIGH',
+				[structuredFieldName('incident', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('incident', 'create', 'category')]: 'identity',
+				[createAdditionalFieldsName('incident')]: {
+					status: '',
+					assigneeId: '',
+					tags: '[]',
+				},
+				[ADDITIONAL_JSON_PARAMETER]: '',
+			},
+		],
+		() => ({ id: 'incident-id-1', displayId: 'INC-1' }),
+	);
+
+	assert.deepEqual(calls[0].body, {
+		name: 'Credential theft',
+		description: 'Okta alerts',
+		severity: 'HIGH',
+		tlp: 'AMBER',
+		category: 'identity',
+	});
+});
+
+test('additional JSON can clear update fields with null values', async () => {
+	const incidentId = '11111111-1111-4111-8111-111111111111';
+	const { calls } = await execute(
+		[
+			{
+				resource: 'incident',
+				operation: 'update',
+				id: incidentId,
+				[updateFieldsName('incident')]: {},
+				[ADDITIONAL_JSON_PARAMETER]: '{"summary":null}',
+			},
+		],
+		() => ({ id: incidentId, summary: null }),
+	);
+
+	assert.equal(calls[0].method, 'PATCH');
+	assert.equal(calls[0].url, `https://hustleops.example.com/api/v1/incidents/${incidentId}`);
+	assert.deepEqual(calls[0].body, { summary: null });
+});
+
+test('legacy body is honored when structured write inputs are empty', async () => {
+	const { calls } = await execute(
+		[
+			{
+				resource: 'incident',
+				operation: 'create',
+				[LEGACY_BODY_PARAMETER]: JSON.stringify({
+					name: 'Credential theft',
+					description: 'Okta alerts',
+					severity: 'HIGH',
+					tlp: 'AMBER',
+					category: 'identity',
+					tags: ['okta'],
+				}),
+			},
+		],
+		() => ({ id: 'incident-id-1', displayId: 'INC-1' }),
+	);
+
+	assert.deepEqual(calls[0].body, {
+		name: 'Credential theft',
+		description: 'Okta alerts',
+		severity: 'HIGH',
+		tlp: 'AMBER',
+		category: 'identity',
+		tags: ['okta'],
+	});
+});
+
+test('additional JSON supported-field overrides are still sanitized before API requests', async () => {
+	const validAlertCreate = {
+		resource: 'alert',
+		operation: 'create',
+		[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
+		[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
+		[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
+		[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
+		[structuredFieldName('alert', 'create', 'source')]: 'okta',
+		[structuredFieldName('alert', 'create', 'type')]: 'identity',
+		[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
+		[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
+		[createAdditionalFieldsName('alert')]: {},
+	};
+
+	const invalidSeverity = createContext(
+		[
+			{
+				...validAlertCreate,
+				[ADDITIONAL_JSON_PARAMETER]: '{"severity":"ADMIN"}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(invalidSeverity.context),
+		/Alert field severity must be one of/,
+	);
+	assert.equal(invalidSeverity.calls.length, 0);
+
+	const invalidUuid = createContext(
+		[
+			{
+				...validAlertCreate,
+				[ADDITIONAL_JSON_PARAMETER]: '{"incidentId":"../users"}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(
+		node.execute.call(invalidUuid.context),
+		/Alert field incidentId must be a UUID/,
+	);
+	assert.equal(invalidUuid.calls.length, 0);
+});
+
+test('structured tags use entity tag validation before API requests', async () => {
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'incident',
+				operation: 'create',
+				[structuredFieldName('incident', 'create', 'name')]: 'Credential theft',
+				[structuredFieldName('incident', 'create', 'description')]: 'Okta alerts',
+				[structuredFieldName('incident', 'create', 'severity')]: 'HIGH',
+				[structuredFieldName('incident', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('incident', 'create', 'category')]: 'identity',
+				[createAdditionalFieldsName('incident')]: {
+					tags: '["okta",7]',
+				},
+				[ADDITIONAL_JSON_PARAMETER]: '{}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Tag value must be a string/);
+	assert.equal(calls.length, 0);
+});
+
+test('additional JSON tag overrides use entity tag validation before API requests', async () => {
+	const validIncidentCreate = {
+		resource: 'incident',
+		operation: 'create',
+		[structuredFieldName('incident', 'create', 'name')]: 'Credential theft',
+		[structuredFieldName('incident', 'create', 'description')]: 'Okta alerts',
+		[structuredFieldName('incident', 'create', 'severity')]: 'HIGH',
+		[structuredFieldName('incident', 'create', 'tlp')]: 'AMBER',
+		[structuredFieldName('incident', 'create', 'category')]: 'identity',
+		[createAdditionalFieldsName('incident')]: {
+			tags: '["okta"]',
+		},
+	};
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+
+	const invalidTagValue = createContext(
+		[
+			{
+				...validIncidentCreate,
+				[ADDITIONAL_JSON_PARAMETER]: '{"tags":["okta",7]}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(node.execute.call(invalidTagValue.context), /Tag value must be a string/);
+	assert.equal(invalidTagValue.calls.length, 0);
+
+	const oversizedTags = Array.from({ length: 21 }, (_value, index) => `tag-${index}`);
+	const oversizedTagList = createContext(
+		[
+			{
+				...validIncidentCreate,
+				[ADDITIONAL_JSON_PARAMETER]: JSON.stringify({ tags: oversizedTags }),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(
+		node.execute.call(oversizedTagList.context),
+		/Entity tags cannot contain more than 20 values/,
+	);
+	assert.equal(oversizedTagList.calls.length, 0);
+});
+
+test('core write validation rejects invalid payloads before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'alert',
+				operation: 'create',
+				[structuredFieldName('alert', 'create', 'name')]: 'x',
+				[structuredFieldName('alert', 'create', 'description')]: '',
+				[structuredFieldName('alert', 'create', 'severity')]: '',
+				[structuredFieldName('alert', 'create', 'tlp')]: '',
+				[structuredFieldName('alert', 'create', 'source')]: '',
+				[structuredFieldName('alert', 'create', 'type')]: '',
+				[structuredFieldName('alert', 'create', 'sourceRef')]: '',
+				[structuredFieldName('alert', 'create', 'detectedAt')]: '',
+				[createAdditionalFieldsName('alert')]: {},
+				[ADDITIONAL_JSON_PARAMETER]: '{"createdById":"user-id"}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
+	};
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Unsupported Alert create field: createdById/);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
+});
+
+test('structured field validation errors reference display labels', async () => {
+	const validAlertCreate = {
+		resource: 'alert',
+		operation: 'create',
+		[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
+		[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
+		[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
+		[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
+		[structuredFieldName('alert', 'create', 'source')]: 'okta',
+		[structuredFieldName('alert', 'create', 'type')]: 'identity',
+		[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
+		[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
+		[createAdditionalFieldsName('alert')]: {},
+		[ADDITIONAL_JSON_PARAMETER]: '{}',
+	};
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+
+	const missingSourceRef = createContext(
+		[
+			{
+				...validAlertCreate,
+				[structuredFieldName('alert', 'create', 'sourceRef')]: '',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(
+		node.execute.call(missingSourceRef.context),
+		/Missing required Alert create field: Source Ref \(sourceRef\)/,
+	);
+	assert.equal(missingSourceRef.calls.length, 0);
+
+	const invalidDetectedAt = createContext(
+		[
+			{
+				...validAlertCreate,
+				[structuredFieldName('alert', 'create', 'detectedAt')]: 'not-a-date',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	await assert.rejects(
+		node.execute.call(invalidDetectedAt.context),
+		/Alert field Detected At \(detectedAt\) must be an ISO date-time string/,
+	);
+	assert.equal(invalidDetectedAt.calls.length, 0);
 });
 
 test('search posts a search request and returns one item per response row', async () => {
@@ -258,7 +589,16 @@ test('unsupported body fields fail before an API request is sent', async () => {
 				{
 					resource: 'alert',
 					operation: 'create',
-					body: '{"name":"x","createdById":"user-id"}',
+					[structuredFieldName('alert', 'create', 'name')]: 'x',
+					[structuredFieldName('alert', 'create', 'description')]: '',
+					[structuredFieldName('alert', 'create', 'severity')]: '',
+					[structuredFieldName('alert', 'create', 'tlp')]: '',
+					[structuredFieldName('alert', 'create', 'source')]: '',
+					[structuredFieldName('alert', 'create', 'type')]: '',
+					[structuredFieldName('alert', 'create', 'sourceRef')]: '',
+					[structuredFieldName('alert', 'create', 'detectedAt')]: '',
+					[createAdditionalFieldsName('alert')]: {},
+					[ADDITIONAL_JSON_PARAMETER]: '{"createdById":"user-id"}',
 				},
 			],
 			() => ({ id: 'should-not-run' }),

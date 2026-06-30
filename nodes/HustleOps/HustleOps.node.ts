@@ -4,8 +4,11 @@ import type {
 	IDataObject,
 	IExecuteFunctions,
 	ILoadOptionsFunctions,
+	INode,
 	INodeCredentialTestResult,
 	INodeExecutionData,
+	INodeParameters,
+	INodeProperties,
 	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
@@ -48,8 +51,12 @@ import {
 	type CustomFieldOperation,
 } from './customFieldDefinitions';
 import {
+	CORE_RESOURCE_DEFINITIONS,
 	CORE_RESOURCE_OPTIONS,
 	type CoreResource,
+	type CoreResourceDefinition,
+	type DtoOperation,
+	type FieldSpec,
 	buildSearchRequest,
 	getCoreResourceDefinition,
 	sanitizeDtoBody,
@@ -59,16 +66,34 @@ import {
 	TAG_OPERATION_OPTIONS,
 	TAG_RESOURCE_OPTION,
 	parseEntityTagValues,
+	parseTagValues,
 	sanitizeTagBody,
 	type EntityTagOperation,
 	type TagOperation,
 } from './tagDefinitions';
+import {
+	ADDITIONAL_JSON_PARAMETER,
+	CORE_WRITE_OPERATIONS,
+	LEGACY_BODY_PARAMETER,
+	createAdditionalFieldsParameterName,
+	fieldDisplayName,
+	structuredFieldParameterName,
+	updateFieldsParameterName,
+} from './structuredCoreFields';
 
 export type CoreOperation = 'search' | 'count' | 'get' | 'create' | 'update';
 export type HustleOpsOperation = CoreOperation | EntityTagOperation;
 export type HustleOpsResource = CoreResource | 'comment' | 'tag' | 'customField';
 
 const LIVE_DESCRIPTION = 'Work with HustleOps incident response objects through the HustleOps API.';
+const STRUCTURED_CORE_FIELDS_NODE: INode = {
+	id: 'hustleops-structured-core-fields',
+	name: 'HustleOps',
+	type: 'hustleOps',
+	typeVersion: 1,
+	position: [0, 0],
+	parameters: {},
+};
 
 const OPERATIONS_WITH_ID: HustleOpsOperation[] = [
 	'get',
@@ -77,7 +102,6 @@ const OPERATIONS_WITH_ID: HustleOpsOperation[] = [
 	'addTags',
 	'removeTag',
 ];
-const OPERATIONS_WITH_BODY: CoreOperation[] = ['create', 'update'];
 const OPERATIONS_WITH_SEARCH_BODY: CoreOperation[] = ['search', 'count'];
 const CORE_RESOURCE_VALUES = CORE_RESOURCE_OPTIONS.map((option) => option.value) as CoreResource[];
 const HUSTLEOPS_RESOURCE_OPTIONS: INodePropertyOptions[] = [
@@ -120,6 +144,365 @@ const CORE_OPERATION_OPTIONS: INodePropertyOptions[] = [
 	},
 	...ENTITY_TAG_OPERATION_OPTIONS,
 ];
+
+function fieldDefaultValue(spec: FieldSpec): string | boolean {
+	if (spec.type === 'boolean') {
+		return false;
+	}
+	if (spec.type === 'tags') {
+		return '[]';
+	}
+	return '';
+}
+
+function fieldType(spec: FieldSpec): INodeProperties['type'] {
+	if (spec.type === 'string' || spec.type === 'uuid' || spec.type === 'url') {
+		return 'string';
+	}
+	if (spec.type === 'number') {
+		return 'number';
+	}
+	if (spec.type === 'boolean') {
+		return 'boolean';
+	}
+	if (spec.type === 'enum') {
+		return 'options';
+	}
+	if (spec.type === 'date-time') {
+		return 'dateTime';
+	}
+	if (spec.type === 'tags') {
+		return 'json';
+	}
+	if (spec.type === 'uuid[]') {
+		throw new NodeOperationError(
+			STRUCTURED_CORE_FIELDS_NODE,
+			'Structured core fields do not yet support uuid[] field specs.',
+		);
+	}
+	const _exhaustive: never = spec.type;
+	throw new NodeOperationError(
+		STRUCTURED_CORE_FIELDS_NODE,
+		`Unsupported structured core field type: ${_exhaustive}`,
+	);
+}
+
+function enumOptionDisplayName(value: string): string {
+	return fieldDisplayName(value.toLowerCase().replace(/_/g, ' '));
+}
+
+function fieldDescription(
+	definition: CoreResourceDefinition,
+	field: string,
+	spec: FieldSpec,
+): string {
+	if (spec.type === 'tags') {
+		return `${definition.displayName} ${fieldDisplayName(field)} as a JSON array of tag names`;
+	}
+	if (spec.type === 'enum' && spec.allowedValues) {
+		return `${definition.displayName} ${fieldDisplayName(field)}. Supported values: ${spec.allowedValues.join(', ')}.`;
+	}
+	return `${definition.displayName} ${fieldDisplayName(field)}`;
+}
+
+function buildFieldProperty(
+	definition: CoreResourceDefinition,
+	field: string,
+	required: boolean,
+	parameterName = field,
+): INodeProperties {
+	const spec = definition.fieldSpecs[field];
+	const property: INodeProperties = {
+		displayName: fieldDisplayName(field),
+		name: parameterName,
+		type: fieldType(spec),
+		default: fieldDefaultValue(spec),
+		required,
+		description: fieldDescription(definition, field, spec),
+	};
+
+	if (spec.type === 'enum' && spec.allowedValues) {
+		property.options = spec.allowedValues.map((value) => ({
+			name: enumOptionDisplayName(value),
+			value,
+		}));
+	}
+
+	return property;
+}
+
+function buildCoreCreateRequiredProperties(): INodeProperties[] {
+	return Object.values(CORE_RESOURCE_DEFINITIONS).flatMap((definition) =>
+		definition.requiredCreateFields.map((field) => ({
+			...buildFieldProperty(
+				definition,
+				field,
+				true,
+				structuredFieldParameterName(definition.resource, 'create', field),
+			),
+			displayOptions: {
+				show: {
+					resource: [definition.resource],
+					operation: ['create'],
+				},
+			},
+		})),
+	);
+}
+
+function buildCoreCreateAdditionalProperties(): INodeProperties[] {
+	return Object.values(CORE_RESOURCE_DEFINITIONS).map((definition) => ({
+		displayName: 'Additional Fields',
+		name: createAdditionalFieldsParameterName(definition.resource),
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		options: definition.createFields
+			.filter((field) => !definition.requiredCreateFields.includes(field))
+			.map((field) => buildFieldProperty(definition, field, false)),
+		displayOptions: {
+			show: {
+				resource: [definition.resource],
+				operation: ['create'],
+			},
+		},
+	}));
+}
+
+function buildCoreUpdateFieldProperties(): INodeProperties[] {
+	return Object.values(CORE_RESOURCE_DEFINITIONS).map((definition) => ({
+		displayName: 'Fields to Update',
+		name: updateFieldsParameterName(definition.resource),
+		type: 'collection',
+		placeholder: 'Add Field',
+		default: {},
+		options: definition.updateFields.map((field) => buildFieldProperty(definition, field, false)),
+		displayOptions: {
+			show: {
+				resource: [definition.resource],
+				operation: ['update'],
+			},
+		},
+	}));
+}
+
+const CORE_CREATE_REQUIRED_PROPERTIES = buildCoreCreateRequiredProperties();
+const CORE_CREATE_ADDITIONAL_PROPERTIES = buildCoreCreateAdditionalProperties();
+const CORE_UPDATE_FIELD_PROPERTIES = buildCoreUpdateFieldProperties();
+
+function shouldOmitStructuredValue(value: unknown): boolean {
+	return value === undefined || value === null || value === '';
+}
+
+function hasStructuredBodyValue(body: IDataObject): boolean {
+	return Object.values(body).some((value) => {
+		if (shouldOmitStructuredValue(value)) {
+			return false;
+		}
+		if (Array.isArray(value)) {
+			return value.length > 0;
+		}
+		return true;
+	});
+}
+
+function normalizeStructuredFieldValue(
+	context: IExecuteFunctions,
+	spec: FieldSpec,
+	value: unknown,
+	itemIndex: number,
+): unknown {
+	if (spec.type === 'tags') {
+		const tags = parseTagValues(context, value, fieldDisplayName(spec.name), itemIndex, {
+			allowEmpty: true,
+		});
+		return tags.length === 0 ? undefined : tags;
+	}
+	return value;
+}
+
+function labelStructuredDtoError(
+	context: IExecuteFunctions,
+	error: unknown,
+	fields: Set<string>,
+	itemIndex: number,
+): never {
+	if (!(error instanceof Error)) {
+		throw error;
+	}
+
+	let message = error.message;
+	for (const field of [...fields].sort((left, right) => right.length - left.length)) {
+		const displayLabel = `${fieldDisplayName(field)} (${field})`;
+		message = message
+			.replace(`field ${field}`, `field ${displayLabel}`)
+			.replace(`field: ${field}`, `field: ${displayLabel}`)
+			.replace(`field ${field} `, `field ${displayLabel} `);
+	}
+
+	throw new NodeOperationError(context.getNode(), message, { itemIndex });
+}
+
+function assignStructuredField(
+	context: IExecuteFunctions,
+	body: IDataObject,
+	structuredFields: Set<string>,
+	definition: CoreResourceDefinition,
+	field: string,
+	value: unknown,
+	omitEmpty: boolean,
+	itemIndex: number,
+): void {
+	const spec = definition.fieldSpecs[field];
+	if (omitEmpty && shouldOmitStructuredValue(value)) {
+		return;
+	}
+
+	const normalizedValue = normalizeStructuredFieldValue(context, spec, value, itemIndex);
+	if (omitEmpty && normalizedValue === undefined) {
+		return;
+	}
+
+	body[field] = normalizedValue as IDataObject[string];
+	structuredFields.add(field);
+}
+
+function getStructuredCollectionValues(
+	context: IExecuteFunctions,
+	parameterName: string,
+	label: string,
+	itemIndex: number,
+): INodeParameters {
+	return parseJsonObject(
+		context,
+		context.getNodeParameter(parameterName, itemIndex, {}),
+		label,
+		itemIndex,
+	) as INodeParameters;
+}
+
+function normalizeMergedDtoBody(
+	context: IExecuteFunctions,
+	body: IDataObject,
+	definition: CoreResourceDefinition,
+	itemIndex: number,
+): IDataObject {
+	if (
+		definition.fieldSpecs.tags?.type === 'tags' &&
+		Object.prototype.hasOwnProperty.call(body, 'tags')
+	) {
+		body.tags = parseTagValues(context, body.tags, 'Tags', itemIndex, {
+			allowEmpty: true,
+		});
+	}
+	return body;
+}
+
+function buildStructuredDtoBody(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	definition: CoreResourceDefinition,
+	operation: DtoOperation,
+): IDataObject {
+	const structuredBody: IDataObject = {};
+	const structuredFields = new Set<string>();
+
+	if (operation === 'create') {
+		for (const field of definition.requiredCreateFields) {
+			assignStructuredField(
+				context,
+				structuredBody,
+				structuredFields,
+				definition,
+				field,
+				context.getNodeParameter(
+					structuredFieldParameterName(definition.resource, 'create', field),
+					itemIndex,
+					'',
+				),
+				false,
+				itemIndex,
+			);
+		}
+
+		const additionalFields = getStructuredCollectionValues(
+			context,
+			createAdditionalFieldsParameterName(definition.resource),
+			'Additional Fields',
+			itemIndex,
+		);
+		for (const field of definition.createFields) {
+			if (definition.requiredCreateFields.includes(field)) {
+				continue;
+			}
+			assignStructuredField(
+				context,
+				structuredBody,
+				structuredFields,
+				definition,
+				field,
+				additionalFields[field],
+				true,
+				itemIndex,
+			);
+		}
+	} else {
+		const fieldsToUpdate = getStructuredCollectionValues(
+			context,
+			updateFieldsParameterName(definition.resource),
+			'Fields to Update',
+			itemIndex,
+		);
+		for (const field of definition.updateFields) {
+			assignStructuredField(
+				context,
+				structuredBody,
+				structuredFields,
+				definition,
+				field,
+				fieldsToUpdate[field],
+				true,
+				itemIndex,
+			);
+		}
+	}
+
+	const additionalJson = parseJsonObject(
+		context,
+		context.getNodeParameter(ADDITIONAL_JSON_PARAMETER, itemIndex, '{}'),
+		'Additional JSON',
+		itemIndex,
+	);
+
+	if (!hasStructuredBodyValue(structuredBody) && Object.keys(additionalJson).length === 0) {
+		const legacyBody = parseJsonObject(
+			context,
+			context.getNodeParameter(LEGACY_BODY_PARAMETER, itemIndex, '{}'),
+			'Body',
+			itemIndex,
+		);
+		if (Object.keys(legacyBody).length > 0) {
+			return sanitizeDtoBody(definition, operation, legacyBody);
+		}
+	}
+
+	const additionalJsonFields = new Set(Object.keys(additionalJson));
+	const structuredOnlyFields = new Set(
+		[...structuredFields].filter((field) => !additionalJsonFields.has(field)),
+	);
+	const mergedBody = normalizeMergedDtoBody(
+		context,
+		{ ...structuredBody, ...additionalJson },
+		definition,
+		itemIndex,
+	);
+
+	try {
+		return sanitizeDtoBody(definition, operation, mergedBody);
+	} catch (error) {
+		labelStructuredDtoError(context, error, structuredOnlyFields, itemIndex);
+	}
+}
 
 async function executeCommentOperation(
 	context: IExecuteFunctions,
@@ -832,18 +1215,34 @@ export class HustleOps implements INodeType {
 					},
 				},
 			},
+			...CORE_CREATE_REQUIRED_PROPERTIES,
+			...CORE_CREATE_ADDITIONAL_PROPERTIES,
+			...CORE_UPDATE_FIELD_PROPERTIES,
 			{
-				displayName: 'Body',
-				name: 'body',
+				displayName: 'Additional JSON',
+				name: ADDITIONAL_JSON_PARAMETER,
 				type: 'json',
 				default: '{}',
-				required: true,
 				description:
-					'JSON body for the HustleOps Create or Update request. Unsupported fields fail before an API request is sent. See the README for minimal examples per resource.',
+					'Additional JSON object for advanced Create or Update payload fields. Values are merged after structured fields and override duplicate structured field names.',
 				displayOptions: {
 					show: {
 						resource: CORE_RESOURCE_VALUES,
-						operation: OPERATIONS_WITH_BODY,
+						operation: CORE_WRITE_OPERATIONS,
+					},
+				},
+			},
+			{
+				displayName: 'Legacy Body',
+				name: LEGACY_BODY_PARAMETER,
+				type: 'hidden',
+				default: '{}',
+				description:
+					'Hidden legacy compatibility field for workflows saved before structured create and update fields were added',
+				displayOptions: {
+					show: {
+						resource: CORE_RESOURCE_VALUES,
+						operation: CORE_WRITE_OPERATIONS,
 					},
 				},
 			},
@@ -1318,46 +1717,36 @@ export class HustleOps implements INodeType {
 
 				const definition = getCoreResourceDefinition(resource);
 				const coreOperation = operation as CoreOperation;
-				const client = await createHustleOpsApiClient(this, itemIndex);
 
 				if (coreOperation === 'get') {
 					const id = this.getNodeParameter('id', itemIndex) as string;
+					const entityId = safePathSegment(id, `${definition.displayName} ID`);
+					const client = await createHustleOpsApiClient(this, itemIndex);
 					const response = await client.request<IDataObject>(
 						'GET',
-						`${definition.path}/${safePathSegment(id, `${definition.displayName} ID`)}`,
+						`${definition.path}/${entityId}`,
 					);
 					returnData.push({ json: response, pairedItem: { item: itemIndex } });
 					continue;
 				}
 
 				if (coreOperation === 'create') {
-					const body = parseJsonObject(
-						this,
-						this.getNodeParameter('body', itemIndex),
-						'Body',
-						itemIndex,
-					);
-					const response = await client.request<IDataObject>(
-						'POST',
-						definition.path,
-						sanitizeDtoBody(definition, 'create', body),
-					);
+					const body = buildStructuredDtoBody(this, itemIndex, definition, 'create');
+					const client = await createHustleOpsApiClient(this, itemIndex);
+					const response = await client.request<IDataObject>('POST', definition.path, body);
 					returnData.push({ json: response, pairedItem: { item: itemIndex } });
 					continue;
 				}
 
 				if (coreOperation === 'update') {
 					const id = this.getNodeParameter('id', itemIndex) as string;
-					const body = parseJsonObject(
-						this,
-						this.getNodeParameter('body', itemIndex),
-						'Body',
-						itemIndex,
-					);
+					const entityId = safePathSegment(id, `${definition.displayName} ID`);
+					const body = buildStructuredDtoBody(this, itemIndex, definition, 'update');
+					const client = await createHustleOpsApiClient(this, itemIndex);
 					const response = await client.request<IDataObject>(
 						'PATCH',
-						`${definition.path}/${safePathSegment(id, `${definition.displayName} ID`)}`,
-						sanitizeDtoBody(definition, 'update', body),
+						`${definition.path}/${entityId}`,
+						body,
 					);
 					returnData.push({ json: response, pairedItem: { item: itemIndex } });
 					continue;
@@ -1372,6 +1761,8 @@ export class HustleOps implements INodeType {
 						itemIndex,
 					),
 				);
+
+				const client = await createHustleOpsApiClient(this, itemIndex);
 
 				if (coreOperation === 'count') {
 					const response = await client.request<IDataObject>(

@@ -62,6 +62,34 @@ function getProperty(description, name) {
 	return property;
 }
 
+const {
+	ADDITIONAL_JSON_PARAMETER,
+	CORE_WRITE_OPERATIONS,
+	LEGACY_BODY_PARAMETER,
+	createAdditionalFieldsParameterName: createAdditionalFieldsName,
+	structuredFieldParameterName: structuredFieldName,
+	updateFieldsParameterName: updateFieldsName,
+} = require('../dist/nodes/HustleOps/structuredCoreFields.js');
+
+function getDisplayedProperty(description, name, resource, operation) {
+	const property = description.properties.find((candidate) => {
+		const show = candidate.displayOptions?.show ?? {};
+		return (
+			candidate.name === name &&
+			show.resource?.includes(resource) &&
+			show.operation?.includes(operation)
+		);
+	});
+	assert.ok(property, `Expected property ${name} for ${resource} ${operation}`);
+	return property;
+}
+
+function hasVisibleJsonBodyProperty(description) {
+	return description.properties.some(
+		(candidate) => candidate.name === LEGACY_BODY_PARAMETER && candidate.type === 'json',
+	);
+}
+
 test('HustleOps node exposes the incident-response resources', () => {
 	const description = getNodeDescription();
 	const resource = getProperty(description, 'resource');
@@ -114,8 +142,9 @@ test('HustleOps node exposes live core API operations', () => {
 test('HustleOps node exposes live request fields', () => {
 	const description = getNodeDescription();
 	const id = getProperty(description, 'id');
-	const body = getProperty(description, 'body');
+	const legacyBody = getProperty(description, LEGACY_BODY_PARAMETER);
 	const searchBody = getProperty(description, 'searchBody');
+	const additionalJson = getProperty(description, ADDITIONAL_JSON_PARAMETER);
 	const returnAll = getProperty(description, 'returnAll');
 	const maxItems = getProperty(description, 'maxItems');
 	const maxPages = getProperty(description, 'maxPages');
@@ -135,11 +164,30 @@ test('HustleOps node exposes live request fields', () => {
 		'removeTag',
 	]);
 
-	assert.equal(body.type, 'json');
-	assert.equal(body.default, '{}');
-	assert.equal(body.required, true);
-	assert.match(body.description, /Create or Update/);
-	assert.deepEqual(body.displayOptions.show.operation, ['create', 'update']);
+	assert.equal(hasVisibleJsonBodyProperty(description), false);
+	assert.equal(legacyBody.type, 'hidden');
+	assert.equal(legacyBody.default, '{}');
+	assert.match(legacyBody.description, /legacy/i);
+	assert.deepEqual(legacyBody.displayOptions.show.resource, [
+		'alert',
+		'incident',
+		'observable',
+		'knowledge',
+	]);
+	assert.deepEqual(legacyBody.displayOptions.show.operation, CORE_WRITE_OPERATIONS);
+
+	assert.equal(additionalJson.type, 'json');
+	assert.equal(additionalJson.default, '{}');
+	assert.equal(additionalJson.required, undefined);
+	assert.match(additionalJson.description, /Additional JSON/);
+	assert.match(additionalJson.description, /merged after structured fields/);
+	assert.deepEqual(additionalJson.displayOptions.show.resource, [
+		'alert',
+		'incident',
+		'observable',
+		'knowledge',
+	]);
+	assert.deepEqual(additionalJson.displayOptions.show.operation, CORE_WRITE_OPERATIONS);
 
 	assert.equal(searchBody.type, 'json');
 	assert.deepEqual(searchBody.displayOptions.show.operation, ['search', 'count']);
@@ -156,6 +204,139 @@ test('HustleOps node exposes live request fields', () => {
 	assert.equal(includePaginationMetadata.type, 'boolean');
 	assert.equal(includePaginationMetadata.default, false);
 	assert.deepEqual(includePaginationMetadata.displayOptions.show.operation, ['search']);
+});
+
+test('HustleOps node exposes structured core create and update fields', () => {
+	const description = getNodeDescription();
+	const { CORE_RESOURCE_DEFINITIONS } = require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const supportedStructuredFieldTypes = new Set([
+		'string',
+		'number',
+		'boolean',
+		'uuid',
+		'enum',
+		'date-time',
+		'url',
+		'tags',
+	]);
+
+	for (const [resource, definition] of Object.entries(CORE_RESOURCE_DEFINITIONS)) {
+		for (const field of [...definition.createFields, ...definition.updateFields]) {
+			assert.ok(
+				supportedStructuredFieldTypes.has(definition.fieldSpecs[field].type),
+				`${resource} ${field} uses a supported structured field type`,
+			);
+		}
+
+		for (const field of definition.requiredCreateFields) {
+			const property = getDisplayedProperty(
+				description,
+				structuredFieldName(resource, 'create', field),
+				resource,
+				'create',
+			);
+			assert.equal(property.required, true, `${resource} ${field} should be required`);
+			assert.equal(property.displayName.length > 0, true);
+		}
+
+		const createAdditionalFields = getDisplayedProperty(
+			description,
+			createAdditionalFieldsName(resource),
+			resource,
+			'create',
+		);
+		const optionalCreateFields = definition.createFields.filter(
+			(field) => !definition.requiredCreateFields.includes(field),
+		);
+		assert.equal(createAdditionalFields.type, 'collection');
+		assert.deepEqual(
+			createAdditionalFields.options.map((option) => option.name),
+			optionalCreateFields,
+		);
+
+		const updateFields = getDisplayedProperty(
+			description,
+			updateFieldsName(resource),
+			resource,
+			'update',
+		);
+		assert.equal(updateFields.type, 'collection');
+		assert.deepEqual(
+			updateFields.options.map((option) => option.name),
+			definition.updateFields,
+		);
+	}
+
+	const alertSeverity = getDisplayedProperty(
+		description,
+		structuredFieldName('alert', 'create', 'severity'),
+		'alert',
+		'create',
+	);
+	assert.equal(alertSeverity.type, 'options');
+	assert.deepEqual(
+		alertSeverity.options.map((option) => option.value),
+		['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'],
+	);
+	assert.deepEqual(
+		alertSeverity.options.map((option) => option.name),
+		['Critical', 'High', 'Medium', 'Low', 'Info'],
+	);
+
+	const alertTlp = getDisplayedProperty(
+		description,
+		structuredFieldName('alert', 'create', 'tlp'),
+		'alert',
+		'create',
+	);
+	assert.equal(alertTlp.type, 'options');
+	assert.deepEqual(
+		alertTlp.options.map((option) => option.value),
+		['RED', 'AMBER_STRICT', 'AMBER', 'GREEN', 'CLEAR'],
+	);
+	assert.deepEqual(
+		alertTlp.options.map((option) => option.name),
+		['Red', 'Amber Strict', 'Amber', 'Green', 'Clear'],
+	);
+
+	assert.equal(
+		getDisplayedProperty(
+			description,
+			structuredFieldName('alert', 'create', 'detectedAt'),
+			'alert',
+			'create',
+		).type,
+		'dateTime',
+	);
+	assert.equal(
+		getDisplayedProperty(
+			description,
+			structuredFieldName('observable', 'create', 'firstSeen'),
+			'observable',
+			'create',
+		).type,
+		'dateTime',
+	);
+	assert.equal(
+		getDisplayedProperty(
+			description,
+			structuredFieldName('observable', 'create', 'lastSeen'),
+			'observable',
+			'create',
+		).type,
+		'dateTime',
+	);
+
+	const alertAdditionalFields = getDisplayedProperty(
+		description,
+		createAdditionalFieldsName('alert'),
+		'alert',
+		'create',
+	);
+	const alertTags = alertAdditionalFields.options.find((option) => option.name === 'tags');
+	assert.ok(alertTags, 'Expected alert tags optional field');
+	assert.equal(alertTags.type, 'json');
+	assert.equal(alertTags.default, '[]');
 });
 
 test('HustleOps node exposes comment operations and fields', () => {
@@ -229,7 +410,6 @@ test('HustleOps node exposes comment operations and fields', () => {
 
 	for (const coreFieldName of [
 		'id',
-		'body',
 		'searchBody',
 		'returnAll',
 		'maxItems',
@@ -242,6 +422,18 @@ test('HustleOps node exposes comment operations and fields', () => {
 			`Expected ${coreFieldName} to be hidden for Comment`,
 		);
 	}
+
+	assert.deepEqual(
+		getProperty(description, ADDITIONAL_JSON_PARAMETER).displayOptions.show.resource,
+		coreResourceValues,
+		'Expected additionalJson to be hidden for Comment',
+	);
+	assert.equal(hasVisibleJsonBodyProperty(description), false);
+	assert.deepEqual(
+		getProperty(description, LEGACY_BODY_PARAMETER).displayOptions.show.resource,
+		coreResourceValues,
+		'Expected hidden legacy body to be scoped to core resources',
+	);
 });
 
 test('HustleOps node exposes tag and custom field operations and fields', () => {
@@ -403,6 +595,18 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /sourceRef/i);
 	assert.match(readme, /firstSeen/i);
 	assert.match(readme, /tlp/i);
+	assert.match(readme, /Additional JSON/i);
+	assert.match(readme, /Additional Fields/i);
+	assert.match(readme, /Fields to Update/i);
+	assert.match(readme, /structured fields/i);
+	assert.match(readme, /merged after structured fields/i);
+	assert.match(readme, /duplicate keys/i);
+	assert.match(readme, /node fields rather than a generic Body editor/i);
+	assert.match(readme, /hidden legacy fallback/i);
+	assert.match(readme, /summary": null/i);
+	assert.match(readme, /Threat Level/i);
+	assert.match(readme, /First Seen/i);
+	assert.match(readme, /Category/i);
 	assert.match(readme, /Comment/i);
 	assert.match(readme, /List/i);
 	assert.match(readme, /Get Unread Count/i);
