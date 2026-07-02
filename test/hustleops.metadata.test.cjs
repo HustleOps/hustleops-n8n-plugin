@@ -581,29 +581,86 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 	assert.equal(packageJson.peerDependencies['n8n-workflow'], '*');
 	assert.deepEqual(packageJson.n8n.credentials, ['dist/credentials/HustleOpsApi.credentials.js']);
 	assert.deepEqual(packageJson.n8n.nodes, ['dist/nodes/HustleOps/HustleOps.node.js']);
+	assert.equal(fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml')), true);
+	assert.equal(
+		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'commit-metadata.yml')),
+		true,
+	);
+	assert.equal(
+		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml')),
+		true,
+	);
 	assert.equal(
 		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml')),
-		true,
+		false,
 	);
 	assert.equal(fs.existsSync(path.join(__dirname, '..', 'LICENSE')), true);
 });
 
-test('publish workflow uses GitHub Actions provenance path', () => {
-	const workflow = fs.readFileSync(
-		path.join(__dirname, '..', '.github', 'workflows', 'publish.yml'),
+test('CI workflows enforce pull request and release quality gates', () => {
+	const ciWorkflow = fs.readFileSync(
+		path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'),
+		'utf8',
+	);
+	const metadataWorkflow = fs.readFileSync(
+		path.join(__dirname, '..', '.github', 'workflows', 'commit-metadata.yml'),
+		'utf8',
+	);
+	const releaseWorkflow = fs.readFileSync(
+		path.join(__dirname, '..', '.github', 'workflows', 'release.yml'),
 		'utf8',
 	);
 
-	assert.match(workflow, /name:\s*Publish/);
-	assert.match(workflow, /tags:\s*\n\s*-\s*'\*\.\*\.\*'/);
-	assert.match(workflow, /id-token:\s*write/);
-	assert.match(workflow, /contents:\s*read/);
-	assert.match(workflow, /actions\/checkout@v4/);
-	assert.match(workflow, /actions\/setup-node@v4/);
-	assert.match(workflow, /cache:\s*'npm'/);
-	assert.match(workflow, /run:\s*npm ci/);
-	assert.match(workflow, /npm run release/);
-	assert.match(workflow, /NPM_TOKEN:\s*\$\{\{ secrets\.NPM_TOKEN \}\}/);
+	assert.match(ciWorkflow, /name:\s*CI/);
+	assert.match(ciWorkflow, /pull_request:/);
+	assert.match(ciWorkflow, /branches:\s*\n\s*-\s*main/);
+	assert.match(ciWorkflow, /contents:\s*read/);
+	assert.match(ciWorkflow, /npm run format:check/);
+	assert.match(ciWorkflow, /npm run lint/);
+	assert.match(ciWorkflow, /npm run typecheck/);
+	assert.match(ciWorkflow, /npm test/);
+	assert.match(ciWorkflow, /npm pack --dry-run/);
+
+	assert.match(metadataWorkflow, /name:\s*Commit Metadata/);
+	assert.match(metadataWorkflow, /pull_request:/);
+	assert.match(metadataWorkflow, /pull-requests:\s*read/);
+	assert.match(metadataWorkflow, /path:\s*base/);
+	assert.match(
+		metadataWorkflow,
+		/repository:\s*\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
+	);
+	assert.match(metadataWorkflow, /node base\/scripts\/ci\/validate-commit-metadata\.cjs/);
+	assert.doesNotMatch(metadataWorkflow, /pull_request_target/);
+
+	assert.match(releaseWorkflow, /name:\s*Release/);
+	assert.match(releaseWorkflow, /workflow_dispatch:/);
+	assert.match(releaseWorkflow, /release_tag:/);
+	assert.match(releaseWorkflow, /contents:\s*write/);
+	assert.match(releaseWorkflow, /id-token:\s*write/);
+	assert.match(releaseWorkflow, /packages:\s*write/);
+	assert.match(releaseWorkflow, /cancel-in-progress:\s*false/);
+	assert.match(releaseWorkflow, /release-prepare\.cjs --release-tag/);
+	assert.match(releaseWorkflow, /release_already_prepared/);
+	assert.match(
+		releaseWorkflow,
+		/if:\s*steps\.preflight\.outputs\.release_already_prepared != 'true'/,
+	);
+	assert.match(releaseWorkflow, /chore\(release\): \$RELEASE_TAG/);
+	assert.match(releaseWorkflow, /gh release create "\$RELEASE_TAG" --draft/);
+	assert.match(releaseWorkflow, /npm publish --dry-run --registry=https:\/\/npm\.pkg\.github\.com/);
+	assert.match(
+		releaseWorkflow,
+		/npm publish --registry=https:\/\/registry\.npmjs\.org\/ --provenance/,
+	);
+	assert.match(releaseWorkflow, /steps\.npm_version\.outputs\.published/);
+	assert.match(releaseWorkflow, /steps\.github_packages_version\.outputs\.published/);
+	assert.match(releaseWorkflow, /npm\.pkg\.github\.com/);
+	assert.match(releaseWorkflow, /RELEASE_MODE:\s*'true'/);
+	assert.doesNotMatch(releaseWorkflow, /secrets\.NPM_TOKEN/);
+	assert.equal(
+		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml')),
+		false,
+	);
 });
 
 test('runtime package surface stays compatible with verified community node constraints', () => {
