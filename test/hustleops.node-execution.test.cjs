@@ -229,6 +229,44 @@ test('structured tags use entity tag validation before API requests', async () =
 	assert.equal(calls.length, 0);
 });
 
+test('core JSON object mode validates tags before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'incident',
+				operation: 'create',
+				payloadInputMode: 'jsonObject',
+				payloadIncidentCreateJsonObject: JSON.stringify({
+					name: 'Credential theft',
+					description: 'Okta alerts',
+					severity: 'HIGH',
+					tlp: 'AMBER',
+					category: 'identity',
+					tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`),
+				}),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
+	};
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(context),
+		/Entity tags cannot contain more than 20 values/,
+	);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
+});
+
 test('structured alert create validates source before API requests', async () => {
 	const { context, calls } = createContext(
 		[
@@ -1033,6 +1071,41 @@ test('entity tag operations are exposed under core resources', async () => {
 	assert.equal(calls[2].body, undefined);
 });
 
+test('entity tag JSON object mode rejects unsupported fields before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'alert',
+				operation: 'setTags',
+				id: '11111111-1111-4111-8111-111111111111',
+				payloadInputMode: 'jsonObject',
+				payloadAlertSetTagsJsonObject: JSON.stringify({
+					values: ['vip'],
+					entityId: '22222222-2222-4222-8222-222222222222',
+				}),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
+	};
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(context),
+		/Unsupported Set Tags JSON Object field: entityId/,
+	);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
+});
+
 test('entity add tags rejects empty values before an API request is sent', async () => {
 	const { context, calls } = createContext(
 		[
@@ -1257,7 +1330,7 @@ test('custom field operations call group, definition, and value endpoints', asyn
 				operation: 'bulkDeleteDefinitions',
 				payloadInputMode: 'individualFields',
 				payloadCustomFieldDefinitionIds: JSON.stringify([definitionId, secondDefinitionId]),
-				force: true,
+				payloadCustomFieldDefinitionForce: true,
 			},
 			{ resource: 'customField', operation: 'getValues', entityType: 'ALERT', entityId: alertId },
 			{

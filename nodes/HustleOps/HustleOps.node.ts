@@ -601,9 +601,8 @@ function buildCoreDtoBody(
 	operation: DtoOperation,
 ): IDataObject {
 	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
-		return sanitizeDtoBody(
-			definition,
-			operation,
+		const body = normalizeMergedDtoBody(
+			context,
 			jsonObjectPayload(
 				context,
 				itemIndex,
@@ -611,7 +610,10 @@ function buildCoreDtoBody(
 				operation,
 				`${definition.displayName} ${operation} JSON Object`,
 			),
+			definition,
+			itemIndex,
 		);
+		return sanitizeDtoBody(definition, operation, body);
 	}
 	return buildStructuredDtoBody(context, itemIndex, definition, operation);
 }
@@ -763,8 +765,16 @@ function buildEntityTagBody(
 			operation,
 			`${operationLabel} JSON Object`,
 		);
-		parseEntityTagValues(context, body.values, operationLabel, itemIndex);
-		return body;
+		for (const key of Object.keys(body)) {
+			if (key !== 'values') {
+				throw new NodeOperationError(
+					context.getNode(),
+					`Unsupported ${operationLabel} JSON Object field: ${key}`,
+					{ itemIndex },
+				);
+			}
+		}
+		return { values: parseEntityTagValues(context, body.values, operationLabel, itemIndex) };
 	}
 	return {
 		values: parseEntityTagValues(
@@ -851,7 +861,7 @@ function buildCustomFieldBodyPayload(
 				'Custom Field Definition IDs',
 				itemIndex,
 			),
-			force: context.getNodeParameter('force', itemIndex, undefined),
+			force: context.getNodeParameter('payloadCustomFieldDefinitionForce', itemIndex, undefined),
 		});
 	}
 	if (operation === 'batchGetValues') {
@@ -1807,12 +1817,11 @@ export class HustleOps implements INodeType {
 				name: 'force',
 				type: 'boolean',
 				default: false,
-				description:
-					'Whether to force deletion. Single deletes send force as a query parameter; bulk deletes send force in the JSON body.',
+				description: 'Whether to force deletion. Single deletes send force as a query parameter.',
 				displayOptions: {
 					show: {
 						resource: ['tag', 'customField'],
-						operation: ['delete', 'deleteGroup', 'deleteDefinition', 'bulkDeleteDefinitions'],
+						operation: ['delete', 'deleteGroup', 'deleteDefinition'],
 					},
 				},
 			},
@@ -1858,6 +1867,18 @@ export class HustleOps implements INodeType {
 				type: 'json',
 				default: '[]',
 				description: 'JSON array of custom field definition UUIDs',
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['bulkDeleteDefinitions'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Force',
+				name: 'payloadCustomFieldDefinitionForce',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to force bulk deletion of custom field definitions',
 				displayOptions: modeDisplayOptions(
 					['customField'],
 					['bulkDeleteDefinitions'],

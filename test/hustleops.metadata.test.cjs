@@ -563,6 +563,10 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 		'payloadCustomFieldDefinitionBulkFields',
 	);
 	const customFieldDefinitionIds = getProperty(description, 'payloadCustomFieldDefinitionIds');
+	const customFieldDefinitionForce = getProperty(
+		description,
+		'payloadCustomFieldDefinitionForce',
+	);
 	const customFieldPayloadRows = getProperty(description, 'payloadCustomFieldValues');
 	const customFieldGroupId = getProperty(description, 'customFieldGroupId');
 	const customFieldDefinitionId = getProperty(description, 'customFieldDefinitionId');
@@ -591,7 +595,6 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 		'delete',
 		'deleteGroup',
 		'deleteDefinition',
-		'bulkDeleteDefinitions',
 	]);
 
 	assert.equal(customFieldGroupFields.type, 'json');
@@ -611,6 +614,13 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 	assert.equal(customFieldDefinitionIds.type, 'json');
 	assert.deepEqual(customFieldDefinitionIds.displayOptions.show.operation, [
 		'bulkDeleteDefinitions',
+	]);
+	assert.equal(customFieldDefinitionForce.type, 'boolean');
+	assert.deepEqual(customFieldDefinitionForce.displayOptions.show.operation, [
+		'bulkDeleteDefinitions',
+	]);
+	assert.deepEqual(customFieldDefinitionForce.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
+		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 	]);
 	assert.equal(customFieldPayloadRows.type, 'json');
 	assert.deepEqual(customFieldPayloadRows.displayOptions.show.operation, [
