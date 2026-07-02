@@ -72,9 +72,7 @@ import {
 	type TagOperation,
 } from './tagDefinitions';
 import {
-	ADDITIONAL_JSON_PARAMETER,
 	CORE_WRITE_OPERATIONS,
-	LEGACY_BODY_PARAMETER,
 	createAdditionalFieldsParameterName,
 	fieldDisplayName,
 	structuredFieldParameterName,
@@ -102,6 +100,8 @@ const OPERATIONS_WITH_ID: HustleOpsOperation[] = [
 	'addTags',
 	'removeTag',
 ];
+const ADDITIONAL_JSON_PARAMETER = 'additionalJson';
+const LEGACY_BODY_PARAMETER = 'body';
 const OPERATIONS_WITH_SEARCH_BODY: CoreOperation[] = ['search', 'count'];
 const CORE_RESOURCE_VALUES = CORE_RESOURCE_OPTIONS.map((option) => option.value) as CoreResource[];
 const HUSTLEOPS_RESOURCE_OPTIONS: INodePropertyOptions[] = [

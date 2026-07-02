@@ -3,6 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const { HUSTLEOPS_API_KEY_HEADER } = require('../dist/nodes/HustleOps/constants.js');
+const {
+	PAYLOAD_INPUT_MODE_PARAMETER,
+	PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+	PAYLOAD_MODE_JSON_OBJECT,
+	payloadJsonObjectParameterName,
+} = require('../dist/nodes/HustleOps/payloadInputMode.js');
 
 const LIVE_DESCRIPTION = 'Work with HustleOps incident response objects through the HustleOps API.';
 
@@ -63,9 +69,7 @@ function getProperty(description, name) {
 }
 
 const {
-	ADDITIONAL_JSON_PARAMETER,
 	CORE_WRITE_OPERATIONS,
-	LEGACY_BODY_PARAMETER,
 	createAdditionalFieldsParameterName: createAdditionalFieldsName,
 	structuredFieldParameterName: structuredFieldName,
 	updateFieldsParameterName: updateFieldsName,
@@ -82,12 +86,6 @@ function getDisplayedProperty(description, name, resource, operation) {
 	});
 	assert.ok(property, `Expected property ${name} for ${resource} ${operation}`);
 	return property;
-}
-
-function hasVisibleJsonBodyProperty(description) {
-	return description.properties.some(
-		(candidate) => candidate.name === LEGACY_BODY_PARAMETER && candidate.type === 'json',
-	);
 }
 
 test('HustleOps node exposes the incident-response resources', () => {
@@ -142,9 +140,6 @@ test('HustleOps node exposes live core API operations', () => {
 test('HustleOps node exposes live request fields', () => {
 	const description = getNodeDescription();
 	const id = getProperty(description, 'id');
-	const legacyBody = getProperty(description, LEGACY_BODY_PARAMETER);
-	const searchBody = getProperty(description, 'searchBody');
-	const additionalJson = getProperty(description, ADDITIONAL_JSON_PARAMETER);
 	const returnAll = getProperty(description, 'returnAll');
 	const maxItems = getProperty(description, 'maxItems');
 	const maxPages = getProperty(description, 'maxPages');
@@ -164,34 +159,6 @@ test('HustleOps node exposes live request fields', () => {
 		'removeTag',
 	]);
 
-	assert.equal(hasVisibleJsonBodyProperty(description), false);
-	assert.equal(legacyBody.type, 'hidden');
-	assert.equal(legacyBody.default, '{}');
-	assert.match(legacyBody.description, /legacy/i);
-	assert.deepEqual(legacyBody.displayOptions.show.resource, [
-		'alert',
-		'incident',
-		'observable',
-		'knowledge',
-	]);
-	assert.deepEqual(legacyBody.displayOptions.show.operation, CORE_WRITE_OPERATIONS);
-
-	assert.equal(additionalJson.type, 'json');
-	assert.equal(additionalJson.default, '{}');
-	assert.equal(additionalJson.required, undefined);
-	assert.match(additionalJson.description, /Additional JSON/);
-	assert.match(additionalJson.description, /merged after structured fields/);
-	assert.deepEqual(additionalJson.displayOptions.show.resource, [
-		'alert',
-		'incident',
-		'observable',
-		'knowledge',
-	]);
-	assert.deepEqual(additionalJson.displayOptions.show.operation, CORE_WRITE_OPERATIONS);
-
-	assert.equal(searchBody.type, 'json');
-	assert.deepEqual(searchBody.displayOptions.show.operation, ['search', 'count']);
-
 	assert.equal(returnAll.type, 'boolean');
 	assert.equal(returnAll.default, false);
 	assert.deepEqual(returnAll.displayOptions.show.operation, ['search']);
@@ -204,6 +171,75 @@ test('HustleOps node exposes live request fields', () => {
 	assert.equal(includePaginationMetadata.type, 'boolean');
 	assert.equal(includePaginationMetadata.default, false);
 	assert.deepEqual(includePaginationMetadata.displayOptions.show.operation, ['search']);
+});
+
+test('HustleOps node exposes payload input mode for every payload operation', () => {
+	const description = getNodeDescription();
+	const mode = getProperty(description, PAYLOAD_INPUT_MODE_PARAMETER);
+
+	assert.equal(mode.type, 'options');
+	assert.equal(mode.default, PAYLOAD_MODE_INDIVIDUAL_FIELDS);
+	assert.deepEqual(
+		mode.options.map((option) => option.value),
+		[PAYLOAD_MODE_INDIVIDUAL_FIELDS, PAYLOAD_MODE_JSON_OBJECT],
+	);
+	assert.deepEqual(mode.displayOptions.show.resource, [
+		'alert',
+		'incident',
+		'observable',
+		'knowledge',
+		'comment',
+		'tag',
+		'customField',
+	]);
+	assert.ok(mode.displayOptions.show.operation.includes('create'));
+	assert.ok(mode.displayOptions.show.operation.includes('search'));
+	assert.ok(mode.displayOptions.show.operation.includes('replaceValues'));
+});
+
+test('HustleOps node removes retired payload parameters', () => {
+	const description = getNodeDescription();
+	for (const name of [
+		'additionalJson',
+		'body',
+		'searchBody',
+		'tagBody',
+		'tagValues',
+		'commentBody',
+		'customFieldBody',
+		'customFieldValues',
+		'entityIds',
+	]) {
+		assert.equal(
+			description.properties.some((property) => property.name === name),
+			false,
+			`Expected retired parameter ${name} to be absent`,
+		);
+	}
+});
+
+test('HustleOps node exposes JSON object payload fields behind JSON Object mode', () => {
+	const description = getNodeDescription();
+	const alertCreateJson = getProperty(
+		description,
+		payloadJsonObjectParameterName('alert', 'create'),
+	);
+	const commentCreateJson = getProperty(
+		description,
+		payloadJsonObjectParameterName('comment', 'create'),
+	);
+	const customFieldBatchJson = getProperty(
+		description,
+		payloadJsonObjectParameterName('customField', 'batchGetValues'),
+	);
+
+	for (const property of [alertCreateJson, commentCreateJson, customFieldBatchJson]) {
+		assert.equal(property.type, 'json');
+		assert.equal(property.default, '{}');
+		assert.deepEqual(property.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
+			PAYLOAD_MODE_JSON_OBJECT,
+		]);
+	}
 });
 
 test('HustleOps node exposes structured core create and update fields', () => {
@@ -423,17 +459,6 @@ test('HustleOps node exposes comment operations and fields', () => {
 		);
 	}
 
-	assert.deepEqual(
-		getProperty(description, ADDITIONAL_JSON_PARAMETER).displayOptions.show.resource,
-		coreResourceValues,
-		'Expected additionalJson to be hidden for Comment',
-	);
-	assert.equal(hasVisibleJsonBodyProperty(description), false);
-	assert.deepEqual(
-		getProperty(description, LEGACY_BODY_PARAMETER).displayOptions.show.resource,
-		coreResourceValues,
-		'Expected hidden legacy body to be scoped to core resources',
-	);
 });
 
 test('HustleOps node exposes tag and custom field operations and fields', () => {
