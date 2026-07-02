@@ -563,10 +563,7 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 		'payloadCustomFieldDefinitionBulkFields',
 	);
 	const customFieldDefinitionIds = getProperty(description, 'payloadCustomFieldDefinitionIds');
-	const customFieldDefinitionForce = getProperty(
-		description,
-		'payloadCustomFieldDefinitionForce',
-	);
+	const customFieldDefinitionForce = getProperty(description, 'payloadCustomFieldDefinitionForce');
 	const customFieldPayloadRows = getProperty(description, 'payloadCustomFieldValues');
 	const customFieldGroupId = getProperty(description, 'customFieldGroupId');
 	const customFieldDefinitionId = getProperty(description, 'customFieldDefinitionId');
