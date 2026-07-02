@@ -1,0 +1,54 @@
+name: Commit Metadata
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Commit Metadata / Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out base validator
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+
+      - name: Check out pull request head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+
+      - name: Fetch base commit
+        working-directory: head
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
+            git fetch --no-tags origin ${{ github.event.pull_request.base.sha }}
+          else
+            git fetch --no-tags https://github.com/${{ github.repository }}.git ${{ github.event.pull_request.base.sha }}
+          fi
+
+      - name: Collect commit subjects
+        working-directory: head
+        run: |
+          git log --format=%s ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > /tmp/commit-subjects.txt
+
+      - name: Validate PR title and commit subjects
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node base/scripts/ci/validate-commit-metadata.cjs --commits-file /tmp/commit-subjects.txt
