@@ -2,21 +2,73 @@ name: PR Check
 
 on:
   pull_request:
-    types:
-      - opened
-      - edited
-      - reopened
-      - synchronize
-      - ready_for_review
+    branches: [main]
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
+  validate:
+    name: PR Check / Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out base validator
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          path: base
+
+      - name: Check out event head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          path: head
+
+      - name: Fetch comparison base
+        working-directory: head
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPOSITORY: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name || github.repository }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ "$HEAD_REPOSITORY" = "$BASE_REPOSITORY" ]; then
+              git fetch --no-tags origin "$BASE_SHA"
+            else
+              git fetch --no-tags "https://github.com/$BASE_REPOSITORY.git" "$BASE_SHA"
+            fi
+          fi
+
+      - name: Collect commit subjects
+        working-directory: head
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_AFTER_SHA: ${{ github.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            git log --format=%s "$PR_BASE_SHA..$PR_HEAD_SHA" > /tmp/commit-subjects.txt
+          elif [ "$PUSH_BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            git log --format=%s --max-count=1 "$PUSH_AFTER_SHA" > /tmp/commit-subjects.txt
+          else
+            git log --format=%s "$PUSH_BEFORE_SHA..$PUSH_AFTER_SHA" > /tmp/commit-subjects.txt
+          fi
+
+      - name: Validate PR title and commit subjects
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node base/scripts/ci/validate-commit-metadata.cjs --commits-file /tmp/commit-subjects.txt
+
   quality:
     name: PR Check / Quality
     runs-on: ubuntu-latest
@@ -48,43 +100,3 @@ jobs:
 
       - name: Check package tarball
         run: npm pack --dry-run
-
-  validate:
-    name: PR Check / Validate
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out base validator
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: base
-
-      - name: Check out pull request head
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.sha }}
-          path: head
-
-      - name: Fetch base commit
-        working-directory: head
-        run: |
-          if [ "${{ github.event.pull_request.head.repo.full_name }}" = "${{ github.repository }}" ]; then
-            git fetch --no-tags origin ${{ github.event.pull_request.base.sha }}
-          else
-            git fetch --no-tags https://github.com/${{ github.repository }}.git ${{ github.event.pull_request.base.sha }}
-          fi
-
-      - name: Collect commit subjects
-        working-directory: head
-        run: |
-          git log --format=%s ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} > /tmp/commit-subjects.txt
-
-      - name: Validate PR title and commit subjects
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: node base/scripts/ci/validate-commit-metadata.cjs --commits-file /tmp/commit-subjects.txt

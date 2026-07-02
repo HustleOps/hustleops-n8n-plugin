@@ -612,10 +612,13 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	);
 
 	assert.match(prCheckWorkflow, /name:\s*PR Check/);
-	assert.match(prCheckWorkflow, /pull_request:/);
-	assert.match(prCheckWorkflow, /branches:\s*\n\s*-\s*main/);
+	assert.match(
+		prCheckWorkflow,
+		/on:\n  pull_request:\n    branches: \[main\]\n  push:\n    branches: \[main\]/,
+	);
 	assert.match(prCheckWorkflow, /contents:\s*read/);
 	assert.match(prCheckWorkflow, /pull-requests:\s*read/);
+	assert.ok(prCheckWorkflow.indexOf('validate:') < prCheckWorkflow.indexOf('quality:'));
 	assert.match(prCheckWorkflow, /name:\s*PR Check \/ Quality/);
 	assert.match(prCheckWorkflow, /npm run format:check/);
 	assert.match(prCheckWorkflow, /npm run lint/);
@@ -623,12 +626,14 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(prCheckWorkflow, /npm test/);
 	assert.match(prCheckWorkflow, /npm pack --dry-run/);
 	assert.match(prCheckWorkflow, /name:\s*PR Check \/ Validate/);
-	assert.match(prCheckWorkflow, /if:\s*github\.event_name == 'pull_request'/);
+	assert.doesNotMatch(prCheckWorkflow, /if:\s*github\.event_name == 'pull_request'/);
 	assert.match(prCheckWorkflow, /path:\s*base/);
 	assert.match(
 		prCheckWorkflow,
-		/repository:\s*\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
+		/repository:\s*\$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.repo\.full_name \|\| github\.repository \}\}/,
 	);
+	assert.match(prCheckWorkflow, /PUSH_BEFORE_SHA:\s*\$\{\{ github\.event\.before \}\}/);
+	assert.match(prCheckWorkflow, /git log --format=%s "\$PUSH_BEFORE_SHA\.\.\$PUSH_AFTER_SHA"/);
 	assert.match(prCheckWorkflow, /node base\/scripts\/ci\/validate-commit-metadata\.cjs/);
 	assert.doesNotMatch(prCheckWorkflow, /pull_request_target/);
 
