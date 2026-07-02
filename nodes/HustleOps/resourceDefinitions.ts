@@ -10,6 +10,11 @@ export type FieldSpec = {
 	type: 'string' | 'number' | 'boolean' | 'uuid' | 'uuid[]' | 'enum' | 'date-time' | 'url' | 'tags';
 	requiredForCreate?: boolean;
 	allowedValues?: readonly string[];
+	maxLength?: number;
+	nonEmpty?: boolean;
+	pattern?: RegExp;
+	patternDescription?: string;
+	description?: string;
 };
 
 export type CoreResourceDefinition = {
@@ -51,6 +56,7 @@ const MAX_SEARCH_DEPTH = 4;
 const MAX_PAGE = 10000;
 const MAX_PAGE_SIZE = 100;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ALERT_SOURCE_PATTERN = /^[a-zA-Z0-9:\-_]+$/;
 const SEVERITY_VALUES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const;
 const TLP_VALUES = ['RED', 'AMBER_STRICT', 'AMBER', 'GREEN', 'CLEAR'] as const;
 const RESOURCE_DEFINITION_NODE: INode = {
@@ -192,8 +198,13 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 			'detectedAt',
 		],
 		fieldSpecs: {
-			name: { name: 'name', type: 'string', requiredForCreate: true },
-			description: { name: 'description', type: 'string', requiredForCreate: true },
+			name: { name: 'name', type: 'string', requiredForCreate: true, maxLength: 200 },
+			description: {
+				name: 'description',
+				type: 'string',
+				requiredForCreate: true,
+				maxLength: 15000,
+			},
 			severity: {
 				name: 'severity',
 				type: 'enum',
@@ -206,11 +217,38 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				requiredForCreate: true,
 				allowedValues: TLP_VALUES,
 			},
-			source: { name: 'source', type: 'string', requiredForCreate: true },
-			type: { name: 'type', type: 'string', requiredForCreate: true },
-			sourceRef: { name: 'sourceRef', type: 'string', requiredForCreate: true },
-			alertRefUrl: { name: 'alertRefUrl', type: 'url' },
-			status: { name: 'status', type: 'string' },
+			source: {
+				name: 'source',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				maxLength: 50,
+				pattern: ALERT_SOURCE_PATTERN,
+				patternDescription: 'may only contain letters, digits, colons, hyphens, and underscores',
+			},
+			type: {
+				name: 'type',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				description:
+					'Must match an active alertType picklist value in HustleOps, such as authentication, endpoint, email, network, dns, user_activity, or other on a default instance.',
+			},
+			sourceRef: {
+				name: 'sourceRef',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				maxLength: 255,
+			},
+			alertRefUrl: { name: 'alertRefUrl', type: 'url', maxLength: 2048 },
+			status: {
+				name: 'status',
+				type: 'string',
+				nonEmpty: true,
+				description:
+					'Must match an active alertStatus picklist value in HustleOps when provided.',
+			},
 			detectedAt: { name: 'detectedAt', type: 'date-time', requiredForCreate: true },
 			incidentId: { name: 'incidentId', type: 'uuid' },
 			assigneeId: { name: 'assigneeId', type: 'uuid' },
@@ -254,8 +292,13 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 		],
 		requiredCreateFields: ['name', 'description', 'severity', 'tlp', 'category'],
 		fieldSpecs: {
-			name: { name: 'name', type: 'string', requiredForCreate: true },
-			description: { name: 'description', type: 'string', requiredForCreate: true },
+			name: { name: 'name', type: 'string', requiredForCreate: true, maxLength: 200 },
+			description: {
+				name: 'description',
+				type: 'string',
+				requiredForCreate: true,
+				maxLength: 15000,
+			},
 			severity: {
 				name: 'severity',
 				type: 'enum',
@@ -268,8 +311,20 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				requiredForCreate: true,
 				allowedValues: TLP_VALUES,
 			},
-			status: { name: 'status', type: 'string' },
-			category: { name: 'category', type: 'string', requiredForCreate: true },
+			status: {
+				name: 'status',
+				type: 'string',
+				nonEmpty: true,
+				description:
+					'Must match an active incidentStatus picklist value in HustleOps when provided.',
+			},
+			category: {
+				name: 'category',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				description: 'Must match an active incidentCategory picklist value in HustleOps.',
+			},
 			assigneeId: { name: 'assigneeId', type: 'uuid' },
 			detectedAt: { name: 'detectedAt', type: 'date-time' },
 			closedAt: { name: 'closedAt', type: 'date-time' },
@@ -312,9 +367,15 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 		],
 		requiredCreateFields: ['value', 'type', 'threatLevel', 'tlp', 'firstSeen', 'lastSeen'],
 		fieldSpecs: {
-			value: { name: 'value', type: 'string', requiredForCreate: true },
-			description: { name: 'description', type: 'string' },
-			type: { name: 'type', type: 'string', requiredForCreate: true },
+			value: { name: 'value', type: 'string', requiredForCreate: true, maxLength: 2048 },
+			description: { name: 'description', type: 'string', maxLength: 5000 },
+			type: {
+				name: 'type',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				description: 'Must match an active observableType picklist value in HustleOps.',
+			},
 			threatLevel: { name: 'threatLevel', type: 'string', requiredForCreate: true },
 			tlp: {
 				name: 'tlp',
@@ -343,9 +404,21 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 		updateFields: ['value', 'description', 'type', 'tlp', 'version'],
 		requiredCreateFields: ['value', 'type', 'tlp'],
 		fieldSpecs: {
-			value: { name: 'value', type: 'string', requiredForCreate: true },
-			description: { name: 'description', type: 'string' },
-			type: { name: 'type', type: 'string', requiredForCreate: true },
+			value: {
+				name: 'value',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				maxLength: 500,
+			},
+			description: { name: 'description', type: 'string', maxLength: 15000 },
+			type: {
+				name: 'type',
+				type: 'string',
+				requiredForCreate: true,
+				nonEmpty: true,
+				description: 'Must match an active knowledgeType picklist value in HustleOps.',
+			},
 			tlp: {
 				name: 'tlp',
 				type: 'enum',
@@ -395,13 +468,19 @@ function validateDtoField(definition: CoreResourceDefinition, field: string, val
 	if (spec.type === 'date-time' && (typeof value !== 'string' || Number.isNaN(Date.parse(value)))) {
 		throw new Error(`${definition.displayName} field ${field} must be an ISO date-time string.`);
 	}
-	if (spec.type === 'url' && typeof value === 'string' && value !== '') {
+	if (spec.type === 'url' && typeof value !== 'string') {
+		throw new Error(`${definition.displayName} field ${field} must be a string.`);
+	}
+	if (spec.type === 'url') {
 		try {
-			new URL(value);
+			const url = new URL(value);
+			if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+				throw new Error('Unsupported protocol.');
+			}
 		} catch {
 			throw new NodeOperationError(
 				RESOURCE_DEFINITION_NODE,
-				`${definition.displayName} field ${field} must be a valid URL.`,
+				`${definition.displayName} field ${field} must be a valid HTTP or HTTPS URL.`,
 			);
 		}
 	}
@@ -415,6 +494,24 @@ function validateDtoField(definition: CoreResourceDefinition, field: string, val
 		(!Array.isArray(value) || value.some((tag) => typeof tag !== 'string'))
 	) {
 		throw new Error(`${definition.displayName} field ${field} must be an array of tag names.`);
+	}
+	if (typeof value !== 'string') {
+		return;
+	}
+	if (spec.nonEmpty && value === '') {
+		throw new Error(`${definition.displayName} field ${field} cannot be empty when provided.`);
+	}
+	if (spec.maxLength !== undefined && value.length > spec.maxLength) {
+		throw new Error(
+			`${definition.displayName} field ${field} cannot exceed ${spec.maxLength} characters.`,
+		);
+	}
+	if (spec.pattern && !spec.pattern.test(value)) {
+		throw new Error(
+			`${definition.displayName} field ${field} ${
+				spec.patternDescription ?? 'has an invalid format'
+			}.`,
+		);
 	}
 }
 

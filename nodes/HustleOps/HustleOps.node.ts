@@ -196,13 +196,26 @@ function fieldDescription(
 	field: string,
 	spec: FieldSpec,
 ): string {
+	const constraints: string[] = [];
+	if (spec.maxLength !== undefined) {
+		constraints.push(`Maximum ${spec.maxLength} characters.`);
+	}
+	if (spec.patternDescription) {
+		constraints.push(`${spec.patternDescription}.`);
+	}
 	if (spec.type === 'tags') {
 		return `${definition.displayName} ${fieldDisplayName(field)} as a JSON array of tag names`;
 	}
 	if (spec.type === 'enum' && spec.allowedValues) {
-		return `${definition.displayName} ${fieldDisplayName(field)}. Supported values: ${spec.allowedValues.join(', ')}.`;
+		constraints.push(`Supported values: ${spec.allowedValues.join(', ')}.`);
 	}
-	return `${definition.displayName} ${fieldDisplayName(field)}`;
+	return [
+		`${definition.displayName} ${fieldDisplayName(field)}.`,
+		spec.description,
+		...constraints,
+	]
+		.filter(Boolean)
+		.join(' ');
 }
 
 function buildFieldProperty(

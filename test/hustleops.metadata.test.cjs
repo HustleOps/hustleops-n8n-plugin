@@ -544,31 +544,96 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 	const packageJson = require('../package.json');
 
 	assert.equal(packageJson.name, '@hustleops/n8n-nodes-hustleops');
-	assert.equal(packageJson.private, true);
+	assert.equal(packageJson.private, undefined);
 	assert.equal(packageJson.license, 'MIT');
 	assert.deepEqual(packageJson.author, {
 		name: 'Dmytro Kosiuk',
 		email: 'misterr.minister@gmail.com',
 	});
+	assert.deepEqual(packageJson.repository, {
+		type: 'git',
+		url: 'git+https://github.com/HustleOps/hustleops-n8n-plugin.git',
+	});
+	assert.deepEqual(packageJson.bugs, {
+		url: 'https://github.com/HustleOps/hustleops-n8n-plugin/issues',
+	});
+	assert.deepEqual(packageJson.publishConfig, {
+		access: 'public',
+		registry: 'https://registry.npmjs.org/',
+	});
+	assert.equal(packageJson.dependencies, undefined);
+	assert.equal(packageJson.optionalDependencies, undefined);
+	assert.equal(packageJson.bundleDependencies, undefined);
+	assert.equal(packageJson.bundledDependencies, undefined);
 	assert.equal(packageJson.keywords.includes('n8n-community-node-package'), true);
 	assert.equal(packageJson.n8n.n8nNodesApiVersion, 1);
 	assert.equal(packageJson.n8n.strict, true);
 	assert.equal(packageJson.scripts.build, 'n8n-node build');
 	assert.equal(packageJson.scripts.dev, 'n8n-node dev');
 	assert.equal(packageJson.scripts.format, 'prettier --write .');
+	assert.equal(packageJson.scripts.release, 'n8n-node release');
+	assert.equal(packageJson.scripts.prepublishOnly, 'n8n-node prerelease');
 	assert.equal(packageJson.scripts['test:unit'], 'node --test test/*.test.cjs');
-	assert.equal(packageJson.scripts.release, undefined);
-	assert.equal(packageJson.scripts.prepublishOnly, undefined);
-	assert.equal(packageJson.devDependencies['@n8n/node-cli'], '0.36.1');
-	assert.equal(packageJson.devDependencies['release-it'], undefined);
+	assert.equal(packageJson.devDependencies['@n8n/node-cli'], '0.37.2');
+	assert.equal(packageJson.devDependencies['release-it'], '^20.2.1');
+	assert.equal(packageJson.devDependencies['auto-changelog'], '^2.5.0');
 	assert.equal(packageJson.overrides, undefined);
 	assert.equal(packageJson.peerDependencies['n8n-workflow'], '*');
 	assert.deepEqual(packageJson.n8n.credentials, ['dist/credentials/HustleOpsApi.credentials.js']);
 	assert.deepEqual(packageJson.n8n.nodes, ['dist/nodes/HustleOps/HustleOps.node.js']);
 	assert.equal(
 		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'publish.yml')),
-		false,
+		true,
 	);
+	assert.equal(fs.existsSync(path.join(__dirname, '..', 'LICENSE')), true);
+});
+
+test('publish workflow uses GitHub Actions provenance path', () => {
+	const workflow = fs.readFileSync(
+		path.join(__dirname, '..', '.github', 'workflows', 'publish.yml'),
+		'utf8',
+	);
+
+	assert.match(workflow, /name:\s*Publish/);
+	assert.match(workflow, /tags:\s*\n\s*-\s*'\*\.\*\.\*'/);
+	assert.match(workflow, /id-token:\s*write/);
+	assert.match(workflow, /contents:\s*read/);
+	assert.match(workflow, /actions\/checkout@v4/);
+	assert.match(workflow, /actions\/setup-node@v4/);
+	assert.match(workflow, /cache:\s*'npm'/);
+	assert.match(workflow, /run:\s*npm ci/);
+	assert.match(workflow, /npm run release/);
+	assert.match(workflow, /NPM_TOKEN:\s*\$\{\{ secrets\.NPM_TOKEN \}\}/);
+});
+
+test('runtime package surface stays compatible with verified community node constraints', () => {
+	const packageJson = require('../package.json');
+	const runtimeSources = [
+		'nodes/HustleOps/HustleOps.node.ts',
+		'nodes/HustleOps/GenericFunctions.ts',
+		'nodes/HustleOps/commentDefinitions.ts',
+		'nodes/HustleOps/customFieldDefinitions.ts',
+		'nodes/HustleOps/resourceDefinitions.ts',
+		'nodes/HustleOps/structuredCoreFields.ts',
+		'nodes/HustleOps/tagDefinitions.ts',
+		'credentials/HustleOpsApi.credentials.ts',
+	]
+		.map((relativePath) => fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8'))
+		.join('\n');
+
+	assert.equal(packageJson.dependencies, undefined);
+	assert.equal(packageJson.optionalDependencies, undefined);
+	assert.equal(packageJson.bundleDependencies, undefined);
+	assert.equal(packageJson.bundledDependencies, undefined);
+	assert.doesNotMatch(runtimeSources, /process\.env/);
+	assert.doesNotMatch(runtimeSources, /from ['"](?:node:)?fs(?:\/promises)?['"]/);
+	assert.doesNotMatch(runtimeSources, /require\(['"](?:node:)?fs(?:\/promises)?['"]\)/);
+	assert.doesNotMatch(
+		runtimeSources,
+		/\b(readFile|writeFile|createReadStream|createWriteStream)\b/,
+	);
+	assert.doesNotMatch(runtimeSources, /from ['"](?:node:)?child_process['"]/);
+	assert.doesNotMatch(runtimeSources, /require\(['"](?:node:)?child_process['"]\)/);
 });
 
 test('README documents live HustleOps API core operations', () => {
@@ -632,6 +697,11 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /one item per comment/i);
 	assert.match(readme, /\{ "unreadCount": number \}/i);
 	assert.match(readme, /Attachment upload and download are not included/i);
+	assert.match(readme, /npm install @hustleops\/n8n-nodes-hustleops/i);
+	assert.match(readme, /Community Nodes/i);
+	assert.match(readme, /npm run release/i);
+	assert.match(readme, /Trusted Publisher/i);
+	assert.match(readme, /Creator Portal/i);
 	assert.doesNotMatch(readme, /metadata-first/i);
 	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
 });

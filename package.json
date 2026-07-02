@@ -1,7 +1,6 @@
 {
 	"name": "@hustleops/n8n-nodes-hustleops",
 	"version": "0.1.0",
-	"private": true,
 	"description": "n8n community node package for HustleOps incident response workflows.",
 	"license": "MIT",
 	"author": {
@@ -9,6 +8,17 @@
 		"email": "misterr.minister@gmail.com"
 	},
 	"homepage": "https://github.com/HustleOps/hustleops-n8n-plugin#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/HustleOps/hustleops-n8n-plugin.git"
+	},
+	"bugs": {
+		"url": "https://github.com/HustleOps/hustleops-n8n-plugin/issues"
+	},
+	"publishConfig": {
+		"access": "public",
+		"registry": "https://registry.npmjs.org/"
+	},
 	"keywords": [
 		"n8n-community-node-package",
 		"n8n",
@@ -26,6 +36,8 @@
 		"format:check": "prettier --check .",
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease",
 		"typecheck": "tsc --noEmit -p tsconfig.json",
 		"test": "npm run build && npm run test:unit",
 		"test:unit": "node --test test/*.test.cjs"
@@ -44,9 +56,11 @@
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "0.36.1",
+		"@n8n/node-cli": "0.37.2",
+		"auto-changelog": "^2.5.0",
 		"eslint": "9.29.0",
 		"prettier": "3.6.2",
+		"release-it": "^20.2.1",
 		"typescript": "5.9.2"
 	},
 	"peerDependencies": {

@@ -324,10 +324,40 @@ Start a local n8n development instance with this node loaded:
 npm run dev
 ```
 
+## npm Release
+
+This package is prepared for public npm release as `@hustleops/n8n-nodes-hustleops`.
+
+For local self-hosted n8n testing before publication, use:
+
+```bash
+npm run dev
+```
+
+After publication, install the package in a self-hosted n8n instance with:
+
+```bash
+npm install @hustleops/n8n-nodes-hustleops
+```
+
+Or install it from n8n's Community Nodes UI by entering this package name:
+
+```text
+@hustleops/n8n-nodes-hustleops
+```
+
+Releases are created from a clean `main` branch:
+
+```bash
+npm run release
+```
+
+The local release command creates the version commit and tag. The pushed tag triggers `.github/workflows/publish.yml`, which publishes to npm from GitHub Actions with provenance. Configure npm Trusted Publisher for the `HustleOps/hustleops-n8n-plugin` repository and `publish.yml` workflow, or set an `NPM_TOKEN` Actions secret as a fallback.
+
+Verified n8n community-node submission happens separately through the n8n Creator Portal after the npm package is public.
+
 ## Limitations
 
 Attachment upload and download are not included in this implementation slice. Comment create can reference up to three staged attachment IDs when another workflow has already uploaded those files.
 
 Admin-only resources such as webhooks, users, teams, roles, and system settings are not included.
-
-The package is still private and is not published to npm.

@@ -153,6 +153,37 @@ test('hustleOpsApiRequest maps HustleOps error bodies into node errors', async (
 	);
 });
 
+test('hustleOpsApiRequest maps stringified HustleOps error bodies into node errors', async () => {
+	const { hustleOpsApiRequest } = loadHelpers();
+	const context = {
+		getNode: () => ({ name: 'HustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		helpers: {
+			httpRequest: async () => {
+				const error = new Error('Request failed with status code 400');
+				error.response = {
+					statusCode: 400,
+					body: JSON.stringify({
+						statusCode: 400,
+						message: ['Invalid value "identity" for picklist "alertType"'],
+						path: '/api/v1/alerts',
+						requestId: 'req-alert-picklist',
+					}),
+				};
+				throw error;
+			},
+		},
+	};
+
+	await assert.rejects(
+		hustleOpsApiRequest(context, 'POST', '/alerts', { type: 'identity' }, 0),
+		/HustleOps API error 400.*Invalid value "identity" for picklist "alertType".*req-alert-picklist.*\/api\/v1\/alerts/,
+	);
+});
+
 test('hustleOpsApiRequest redacts secrets from surfaced errors', async () => {
 	const { hustleOpsApiRequest } = loadHelpers();
 	const context = {
@@ -367,7 +398,7 @@ test('sanitizeDtoBody rejects unknown fields and strips undefined values', () =>
 			severity: 'HIGH',
 			tlp: 'AMBER',
 			source: 'okta',
-			type: 'identity',
+			type: 'authentication',
 			sourceRef: 'evt_1',
 			detectedAt: '2026-06-28T12:00:00.000Z',
 			tags: undefined,
@@ -378,7 +409,7 @@ test('sanitizeDtoBody rejects unknown fields and strips undefined values', () =>
 			severity: 'HIGH',
 			tlp: 'AMBER',
 			source: 'okta',
-			type: 'identity',
+			type: 'authentication',
 			sourceRef: 'evt_1',
 			detectedAt: '2026-06-28T12:00:00.000Z',
 		},
@@ -398,6 +429,64 @@ test('sanitizeDtoBody rejects unknown fields and strips undefined values', () =>
 	);
 });
 
+test('sanitizeDtoBody mirrors alert create DTO string constraints', () => {
+	const {
+		CORE_RESOURCE_DEFINITIONS,
+		sanitizeDtoBody,
+	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const validAlertCreate = {
+		name: 'Suspicious login',
+		description: 'Okta anomaly',
+		severity: 'HIGH',
+		tlp: 'AMBER',
+		source: 'okta',
+		type: 'authentication',
+		sourceRef: 'evt_1',
+		detectedAt: '2026-06-28T12:00:00.000Z',
+	};
+
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+				...validAlertCreate,
+				source: 'okta source',
+			}),
+		/Alert field source may only contain letters, digits, colons, hyphens, and underscores/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+				...validAlertCreate,
+				source: 'x'.repeat(51),
+			}),
+		/Alert field source cannot exceed 50 characters/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+				...validAlertCreate,
+				sourceRef: 'x'.repeat(256),
+			}),
+		/Alert field sourceRef cannot exceed 255 characters/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+				...validAlertCreate,
+				alertRefUrl: 'ftp://okta.example.com/events/evt_1',
+			}),
+		/Alert field alertRefUrl must be a valid HTTP or HTTPS URL/,
+	);
+	assert.throws(
+		() =>
+			sanitizeDtoBody(CORE_RESOURCE_DEFINITIONS.alert, 'create', {
+				...validAlertCreate,
+				status: '',
+			}),
+		/Alert field status cannot be empty when provided/,
+	);
+});
+
 test('sanitizeDtoBody accepts all API-supported severity and TLP enum values', () => {
 	const {
 		CORE_RESOURCE_DEFINITIONS,
@@ -411,7 +500,7 @@ test('sanitizeDtoBody accepts all API-supported severity and TLP enum values', (
 			severity: 'INFO',
 			tlp: 'AMBER_STRICT',
 			source: 'okta',
-			type: 'identity',
+			type: 'authentication',
 			sourceRef: 'evt-info-1',
 			detectedAt: '2026-06-28T12:00:00.000Z',
 		}).severity,

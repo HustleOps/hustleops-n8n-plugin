@@ -130,7 +130,7 @@ test('additional JSON merges after structured create fields and overrides duplic
 				[structuredFieldName('alert', 'create', 'severity')]: 'LOW',
 				[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
 				[structuredFieldName('alert', 'create', 'source')]: 'okta',
-				[structuredFieldName('alert', 'create', 'type')]: 'identity',
+				[structuredFieldName('alert', 'create', 'type')]: 'authentication',
 				[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
 				[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
 				[createAdditionalFieldsName('alert')]: {},
@@ -149,7 +149,7 @@ test('additional JSON merges after structured create fields and overrides duplic
 		severity: 'HIGH',
 		tlp: 'AMBER',
 		source: 'okta',
-		type: 'identity',
+		type: 'authentication',
 		sourceRef: 'evt_12345',
 		detectedAt: '2026-06-28T12:00:00.000Z',
 		alertRefUrl: 'https://okta.example.com/events/evt_12345',
@@ -245,7 +245,7 @@ test('additional JSON supported-field overrides are still sanitized before API r
 		[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
 		[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
 		[structuredFieldName('alert', 'create', 'source')]: 'okta',
-		[structuredFieldName('alert', 'create', 'type')]: 'identity',
+		[structuredFieldName('alert', 'create', 'type')]: 'authentication',
 		[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
 		[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
 		[createAdditionalFieldsName('alert')]: {},
@@ -355,6 +355,36 @@ test('additional JSON tag overrides use entity tag validation before API request
 	assert.equal(oversizedTagList.calls.length, 0);
 });
 
+test('structured alert create validates source before API requests', async () => {
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'alert',
+				operation: 'create',
+				[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
+				[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
+				[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
+				[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('alert', 'create', 'source')]: 'okta source',
+				[structuredFieldName('alert', 'create', 'type')]: 'authentication',
+				[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
+				[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
+				[createAdditionalFieldsName('alert')]: {},
+				[ADDITIONAL_JSON_PARAMETER]: '{}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(context),
+		/Alert field Source \(source\) may only contain letters, digits, colons, hyphens, and underscores/,
+	);
+	assert.equal(calls.length, 0);
+});
+
 test('core write validation rejects invalid payloads before credentials are read', async () => {
 	let getCredentialsCalled = false;
 	const { context, calls } = createContext(
@@ -400,7 +430,7 @@ test('structured field validation errors reference display labels', async () => 
 		[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
 		[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
 		[structuredFieldName('alert', 'create', 'source')]: 'okta',
-		[structuredFieldName('alert', 'create', 'type')]: 'identity',
+		[structuredFieldName('alert', 'create', 'type')]: 'authentication',
 		[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
 		[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
 		[createAdditionalFieldsName('alert')]: {},
