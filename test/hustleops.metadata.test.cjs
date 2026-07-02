@@ -581,10 +581,14 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 	assert.equal(packageJson.peerDependencies['n8n-workflow'], '*');
 	assert.deepEqual(packageJson.n8n.credentials, ['dist/credentials/HustleOpsApi.credentials.js']);
 	assert.deepEqual(packageJson.n8n.nodes, ['dist/nodes/HustleOps/HustleOps.node.js']);
-	assert.equal(fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml')), true);
+	assert.equal(
+		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'pr-check.yml')),
+		true,
+	);
+	assert.equal(fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'ci.yml')), false);
 	assert.equal(
 		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'commit-metadata.yml')),
-		true,
+		false,
 	);
 	assert.equal(
 		fs.existsSync(path.join(__dirname, '..', '.github', 'workflows', 'release.yml')),
@@ -597,13 +601,9 @@ test('package.json registers the compiled HustleOps node and credentials', () =>
 	assert.equal(fs.existsSync(path.join(__dirname, '..', 'LICENSE')), true);
 });
 
-test('CI workflows enforce pull request and release quality gates', () => {
-	const ciWorkflow = fs.readFileSync(
-		path.join(__dirname, '..', '.github', 'workflows', 'ci.yml'),
-		'utf8',
-	);
-	const metadataWorkflow = fs.readFileSync(
-		path.join(__dirname, '..', '.github', 'workflows', 'commit-metadata.yml'),
+test('PR check workflow enforces pull request and release quality gates', () => {
+	const prCheckWorkflow = fs.readFileSync(
+		path.join(__dirname, '..', '.github', 'workflows', 'pr-check.yml'),
 		'utf8',
 	);
 	const releaseWorkflow = fs.readFileSync(
@@ -611,26 +611,26 @@ test('CI workflows enforce pull request and release quality gates', () => {
 		'utf8',
 	);
 
-	assert.match(ciWorkflow, /name:\s*CI/);
-	assert.match(ciWorkflow, /pull_request:/);
-	assert.match(ciWorkflow, /branches:\s*\n\s*-\s*main/);
-	assert.match(ciWorkflow, /contents:\s*read/);
-	assert.match(ciWorkflow, /npm run format:check/);
-	assert.match(ciWorkflow, /npm run lint/);
-	assert.match(ciWorkflow, /npm run typecheck/);
-	assert.match(ciWorkflow, /npm test/);
-	assert.match(ciWorkflow, /npm pack --dry-run/);
-
-	assert.match(metadataWorkflow, /name:\s*Commit Metadata/);
-	assert.match(metadataWorkflow, /pull_request:/);
-	assert.match(metadataWorkflow, /pull-requests:\s*read/);
-	assert.match(metadataWorkflow, /path:\s*base/);
+	assert.match(prCheckWorkflow, /name:\s*PR Check/);
+	assert.match(prCheckWorkflow, /pull_request:/);
+	assert.match(prCheckWorkflow, /branches:\s*\n\s*-\s*main/);
+	assert.match(prCheckWorkflow, /contents:\s*read/);
+	assert.match(prCheckWorkflow, /pull-requests:\s*read/);
+	assert.match(prCheckWorkflow, /name:\s*PR Check \/ Quality/);
+	assert.match(prCheckWorkflow, /npm run format:check/);
+	assert.match(prCheckWorkflow, /npm run lint/);
+	assert.match(prCheckWorkflow, /npm run typecheck/);
+	assert.match(prCheckWorkflow, /npm test/);
+	assert.match(prCheckWorkflow, /npm pack --dry-run/);
+	assert.match(prCheckWorkflow, /name:\s*PR Check \/ Validate/);
+	assert.match(prCheckWorkflow, /if:\s*github\.event_name == 'pull_request'/);
+	assert.match(prCheckWorkflow, /path:\s*base/);
 	assert.match(
-		metadataWorkflow,
+		prCheckWorkflow,
 		/repository:\s*\$\{\{ github\.event\.pull_request\.head\.repo\.full_name \}\}/,
 	);
-	assert.match(metadataWorkflow, /node base\/scripts\/ci\/validate-commit-metadata\.cjs/);
-	assert.doesNotMatch(metadataWorkflow, /pull_request_target/);
+	assert.match(prCheckWorkflow, /node base\/scripts\/ci\/validate-commit-metadata\.cjs/);
+	assert.doesNotMatch(prCheckWorkflow, /pull_request_target/);
 
 	assert.match(releaseWorkflow, /name:\s*Release/);
 	assert.match(releaseWorkflow, /workflow_dispatch:/);

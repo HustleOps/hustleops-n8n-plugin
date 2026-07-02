@@ -330,8 +330,8 @@ This package is prepared for public npm release as `@hustleops-n8n/n8n-nodes-hus
 
 Normal development must merge to `main` through reviewed pull requests. Required checks are:
 
-- `CI / Quality`
-- `Commit Metadata / Validate`
+- `PR Check / Quality`
+- `PR Check / Validate`
 
 Commit subjects and PR titles must use Conventional Commits, such as:
 
