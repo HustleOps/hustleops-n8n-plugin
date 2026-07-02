@@ -756,8 +756,12 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Attachment upload and download are not included/i);
 	assert.match(readme, /npm install @hustleops-n8n\/n8n-nodes-hustleops/i);
 	assert.match(readme, /Community Nodes/i);
-	assert.match(readme, /npm run release/i);
-	assert.match(readme, /Trusted Publisher/i);
+	assert.match(readme, /Release workflow/i);
+	assert.match(readme, /v0\.1\.2/i);
+	assert.match(readme, /Conventional Commits/i);
+	assert.match(readme, /Trusted Publishing/i);
+	assert.match(readme, /GitHub Packages/i);
+	assert.doesNotMatch(readme, /npm run release/i);
 	assert.match(readme, /Creator Portal/i);
 	assert.doesNotMatch(readme, /metadata-first/i);
 	assert.doesNotMatch(readme, /does not call the HustleOps API/i);

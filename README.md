@@ -324,15 +324,40 @@ Start a local n8n development instance with this node loaded:
 npm run dev
 ```
 
-## npm Release
+## Release
 
 This package is prepared for public npm release as `@hustleops-n8n/n8n-nodes-hustleops`.
 
-For local self-hosted n8n testing before publication, use:
+Normal development must merge to `main` through reviewed pull requests. Required checks are:
 
-```bash
-npm run dev
+- `CI / Quality`
+- `Commit Metadata / Validate`
+
+Commit subjects and PR titles must use Conventional Commits, such as:
+
+```text
+feat: add alert operation
+fix(ci): correct package registry check
+docs: update release runbook
+chore(release): v0.1.2
 ```
+
+Releases are created from GitHub Actions with the manual `Release` workflow. Run the workflow with a stable tag input such as:
+
+```text
+v0.1.2
+```
+
+The workflow derives package version `0.1.2`, validates the previous tag, updates `package.json`, `package-lock.json`, and `CHANGELOG.md`, creates `chore(release): v0.1.2`, tags that commit, creates a draft GitHub Release, publishes to npm with provenance, publishes to GitHub Packages, then publishes the GitHub Release.
+
+Existing repository tags `0.1.0` and `0.1.1` use the old bare semver style. New workflow-created tags use the `vX.Y.Z` style, and the release workflow treats both styles as valid previous-release boundaries.
+
+Before the first workflow release, configure:
+
+- npm Trusted Publishing for `HustleOps/hustleops-n8n-plugin` and `.github/workflows/release.yml`.
+- GitHub branch protection or a ruleset for `main`.
+- The release bypass actor or `RELEASE_BYPASS_TOKEN`, if `GITHUB_TOKEN` cannot bypass protection.
+- GitHub Packages ownership for the `@hustleops-n8n` scope.
 
 After publication, install the package in a self-hosted n8n instance with:
 
@@ -345,14 +370,6 @@ Or install it from n8n's Community Nodes UI by entering this package name:
 ```text
 @hustleops-n8n/n8n-nodes-hustleops
 ```
-
-Releases are created from a clean `main` branch:
-
-```bash
-npm run release
-```
-
-The local release command creates the version commit and tag. The pushed tag triggers `.github/workflows/publish.yml`, which publishes to npm from GitHub Actions with provenance. Configure npm Trusted Publisher for the `HustleOps/hustleops-n8n-plugin` repository and `publish.yml` workflow, or set an `NPM_TOKEN` Actions secret as a fallback.
 
 Verified n8n community-node submission happens separately through the n8n Creator Portal after the npm package is public.
 
