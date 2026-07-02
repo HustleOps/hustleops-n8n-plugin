@@ -1,6 +1,8 @@
 dist/
 node_modules/
 docs/
+.codex/
+.claude/
 *.tsbuildinfo
 *.tgz
 .DS_Store
