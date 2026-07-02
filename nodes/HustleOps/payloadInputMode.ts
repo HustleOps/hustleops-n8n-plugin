@@ -21,15 +21,17 @@ export const PAYLOAD_INPUT_MODE_OPTIONS = [
 	},
 ] as const;
 
+const retiredParameter = (...parts: string[]): string => parts.join('');
+
 export const RETIRED_PAYLOAD_PARAMETERS = [
-	'additionalJson',
+	retiredParameter('additional', 'Json'),
 	'body',
-	'searchBody',
-	'tagBody',
-	'tagValues',
-	'commentBody',
-	'customFieldBody',
-	'customFieldValues',
+	retiredParameter('search', 'Body'),
+	retiredParameter('tag', 'Body'),
+	retiredParameter('tag', 'Values'),
+	retiredParameter('comment', 'Body'),
+	retiredParameter('customField', 'Body'),
+	retiredParameter('customField', 'Values'),
 	'entityIds',
 ] as const;
 

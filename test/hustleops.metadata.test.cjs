@@ -7,6 +7,7 @@ const {
 	PAYLOAD_INPUT_MODE_PARAMETER,
 	PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 	PAYLOAD_MODE_JSON_OBJECT,
+	RETIRED_PAYLOAD_PARAMETERS,
 	payloadJsonObjectParameterName,
 } = require('../dist/nodes/HustleOps/payloadInputMode.js');
 
@@ -66,6 +67,10 @@ function getProperty(description, name) {
 	const property = description.properties.find((candidate) => candidate.name === name);
 	assert.ok(property, `Expected property ${name} to exist`);
 	return property;
+}
+
+function readmePhrasePattern(...parts) {
+	return new RegExp(parts.join(' '), 'i');
 }
 
 const {
@@ -195,21 +200,38 @@ test('HustleOps node exposes payload input mode for every payload operation', ()
 	assert.ok(mode.displayOptions.show.operation.includes('create'));
 	assert.ok(mode.displayOptions.show.operation.includes('search'));
 	assert.ok(mode.displayOptions.show.operation.includes('replaceValues'));
+	for (const operation of [
+		'search',
+		'count',
+		'create',
+		'update',
+		'setTags',
+		'addTags',
+		'toggleReaction',
+		'updateColor',
+		'bulkUpdateColor',
+		'bulkDelete',
+		'searchDefinitions',
+		'createGroup',
+		'updateGroup',
+		'createDefinition',
+		'updateDefinition',
+		'bulkUpdateDefinitions',
+		'bulkDeleteDefinitions',
+		'batchGetValues',
+		'replaceValues',
+		'updateSelectedValuesSafely',
+	]) {
+		assert.ok(
+			mode.displayOptions.show.operation.includes(operation),
+			`Expected Input Mode to show for ${operation}`,
+		);
+	}
 });
 
 test('HustleOps node removes retired payload parameters', () => {
 	const description = getNodeDescription();
-	for (const name of [
-		'additionalJson',
-		'body',
-		'searchBody',
-		'tagBody',
-		'tagValues',
-		'commentBody',
-		'customFieldBody',
-		'customFieldValues',
-		'entityIds',
-	]) {
+	for (const name of RETIRED_PAYLOAD_PARAMETERS) {
 		assert.equal(
 			description.properties.some((property) => property.name === name),
 			false,
@@ -232,6 +254,17 @@ test('HustleOps node exposes JSON object payload fields behind JSON Object mode'
 		description,
 		payloadJsonObjectParameterName('customField', 'batchGetValues'),
 	);
+	const payloadSearchFilter = getProperty(description, 'payloadSearchFilter');
+
+	assert.deepEqual(alertCreateJson.displayOptions.show.resource, ['alert']);
+	assert.deepEqual(alertCreateJson.displayOptions.show.operation, ['create']);
+	assert.deepEqual(alertCreateJson.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
+		PAYLOAD_MODE_JSON_OBJECT,
+	]);
+	assert.equal(payloadSearchFilter.default, '{}');
+	assert.deepEqual(payloadSearchFilter.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
+		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+	]);
 
 	for (const property of [alertCreateJson, commentCreateJson, customFieldBatchJson]) {
 		assert.equal(property.type, 'json');
@@ -407,7 +440,9 @@ test('HustleOps node exposes comment operations and fields', () => {
 	const cursor = getProperty(description, 'cursor');
 	const q = getProperty(description, 'q');
 	const maxResults = getProperty(description, 'maxResults');
-	const commentBody = getProperty(description, 'commentBody');
+	const commentContent = getProperty(description, 'payloadCommentContent');
+	const commentAttachmentIds = getProperty(description, 'payloadCommentAttachmentIds');
+	const commentEmoji = getProperty(description, 'payloadCommentEmoji');
 	const includeCommentPaginationMetadata = getProperty(
 		description,
 		'includeCommentPaginationMetadata',
@@ -436,17 +471,19 @@ test('HustleOps node exposes comment operations and fields', () => {
 	assert.equal(maxResults.typeOptions.minValue, 1);
 	assert.equal(maxResults.typeOptions.maxValue, 100);
 	assert.deepEqual(maxResults.displayOptions.show.operation, ['search']);
-	assert.equal(commentBody.type, 'json');
-	assert.deepEqual(commentBody.displayOptions.show.operation, [
-		'create',
-		'update',
-		'toggleReaction',
+	assert.equal(commentContent.type, 'string');
+	assert.deepEqual(commentContent.displayOptions.show.operation, ['create', 'update']);
+	assert.deepEqual(commentContent.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
+		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 	]);
+	assert.equal(commentAttachmentIds.type, 'json');
+	assert.deepEqual(commentAttachmentIds.displayOptions.show.operation, ['create']);
+	assert.equal(commentEmoji.type, 'string');
+	assert.deepEqual(commentEmoji.displayOptions.show.operation, ['toggleReaction']);
 	assert.deepEqual(includeCommentPaginationMetadata.displayOptions.show.operation, ['list']);
 
 	for (const coreFieldName of [
 		'id',
-		'searchBody',
 		'returnAll',
 		'maxItems',
 		'maxPages',
@@ -458,7 +495,6 @@ test('HustleOps node exposes comment operations and fields', () => {
 			`Expected ${coreFieldName} to be hidden for Comment`,
 		);
 	}
-
 });
 
 test('HustleOps node exposes tag and custom field operations and fields', () => {
@@ -510,34 +546,74 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 		['search', 'count', 'get', 'create', 'update', 'setTags', 'addTags', 'removeTag'],
 	);
 
-	const tagBody = getProperty(description, 'tagBody');
-	const tagValues = getProperty(description, 'tagValues');
+	const tagValue = getProperty(description, 'payloadTagValue');
+	const tagColor = getProperty(description, 'payloadTagColor');
+	const tagIds = getProperty(description, 'payloadTagIds');
+	const tagForce = getProperty(description, 'payloadTagForce');
+	const entityTagValues = getProperty(description, 'payloadEntityTagValues');
 	const tagId = getProperty(description, 'tagId');
 	const force = getProperty(description, 'force');
-	const customFieldBody = getProperty(description, 'customFieldBody');
-	const customFieldValues = getProperty(description, 'customFieldValues');
+	const customFieldGroupFields = getProperty(description, 'payloadCustomFieldGroupFields');
+	const customFieldDefinitionFields = getProperty(
+		description,
+		'payloadCustomFieldDefinitionFields',
+	);
+	const customFieldDefinitionBulkFields = getProperty(
+		description,
+		'payloadCustomFieldDefinitionBulkFields',
+	);
+	const customFieldDefinitionIds = getProperty(description, 'payloadCustomFieldDefinitionIds');
+	const customFieldPayloadRows = getProperty(description, 'payloadCustomFieldValues');
 	const customFieldGroupId = getProperty(description, 'customFieldGroupId');
 	const customFieldDefinitionId = getProperty(description, 'customFieldDefinitionId');
-	const entityIds = getProperty(description, 'entityIds');
+	const entityIds = getProperty(description, 'payloadCustomFieldEntityIds');
 
-	assert.equal(tagBody.type, 'json');
-	assert.deepEqual(tagBody.displayOptions.show.resource, ['tag']);
-	assert.equal(tagValues.type, 'json');
-	assert.deepEqual(tagValues.displayOptions.show.operation, ['setTags', 'addTags']);
+	assert.equal(entityTagValues.type, 'json');
+	assert.deepEqual(entityTagValues.displayOptions.show.operation, ['setTags', 'addTags']);
+	assert.deepEqual(entityTagValues.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
+		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+	]);
+	assert.equal(tagValue.type, 'string');
+	assert.deepEqual(tagValue.displayOptions.show.operation, ['create']);
+	assert.equal(tagColor.type, 'string');
+	assert.deepEqual(tagColor.displayOptions.show.operation, [
+		'create',
+		'updateColor',
+		'bulkUpdateColor',
+	]);
+	assert.equal(tagIds.type, 'json');
+	assert.deepEqual(tagIds.displayOptions.show.operation, ['bulkUpdateColor', 'bulkDelete']);
+	assert.equal(tagForce.type, 'boolean');
+	assert.deepEqual(tagForce.displayOptions.show.operation, ['bulkDelete']);
 	assert.equal(tagId.type, 'options');
 	assert.deepEqual(tagId.displayOptions.show.operation, ['updateColor', 'delete', 'removeTag']);
 	assert.deepEqual(force.displayOptions.show.operation, [
 		'delete',
-		'bulkDelete',
 		'deleteGroup',
 		'deleteDefinition',
 		'bulkDeleteDefinitions',
 	]);
 
-	assert.equal(customFieldBody.type, 'json');
-	assert.deepEqual(customFieldBody.displayOptions.show.resource, ['customField']);
-	assert.equal(customFieldValues.type, 'json');
-	assert.deepEqual(customFieldValues.displayOptions.show.operation, [
+	assert.equal(customFieldGroupFields.type, 'json');
+	assert.deepEqual(customFieldGroupFields.displayOptions.show.operation, [
+		'createGroup',
+		'updateGroup',
+	]);
+	assert.equal(customFieldDefinitionFields.type, 'json');
+	assert.deepEqual(customFieldDefinitionFields.displayOptions.show.operation, [
+		'createDefinition',
+		'updateDefinition',
+	]);
+	assert.equal(customFieldDefinitionBulkFields.type, 'json');
+	assert.deepEqual(customFieldDefinitionBulkFields.displayOptions.show.operation, [
+		'bulkUpdateDefinitions',
+	]);
+	assert.equal(customFieldDefinitionIds.type, 'json');
+	assert.deepEqual(customFieldDefinitionIds.displayOptions.show.operation, [
+		'bulkDeleteDefinitions',
+	]);
+	assert.equal(customFieldPayloadRows.type, 'json');
+	assert.deepEqual(customFieldPayloadRows.displayOptions.show.operation, [
 		'replaceValues',
 		'updateSelectedValuesSafely',
 	]);
@@ -758,14 +834,20 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /sourceRef/i);
 	assert.match(readme, /firstSeen/i);
 	assert.match(readme, /tlp/i);
-	assert.match(readme, /Additional JSON/i);
+	assert.match(readme, /Input Mode/i);
+	assert.match(readme, /Individual Fields/i);
+	assert.match(readme, /JSON Object/i);
+	assert.match(readme, /full replacement/i);
 	assert.match(readme, /Additional Fields/i);
 	assert.match(readme, /Fields to Update/i);
 	assert.match(readme, /structured fields/i);
-	assert.match(readme, /merged after structured fields/i);
-	assert.match(readme, /duplicate keys/i);
-	assert.match(readme, /node fields rather than a generic Body editor/i);
-	assert.match(readme, /hidden legacy fallback/i);
+	assert.doesNotMatch(readme, readmePhrasePattern('Additional', 'JSON'));
+	assert.doesNotMatch(readme, readmePhrasePattern('merged after', 'structured fields'));
+	assert.doesNotMatch(readme, readmePhrasePattern('legacy', 'fallback'));
+	assert.doesNotMatch(readme, readmePhrasePattern('Search', 'Body'));
+	assert.doesNotMatch(readme, readmePhrasePattern('Tag', 'Body'));
+	assert.doesNotMatch(readme, readmePhrasePattern('Comment', 'Body'));
+	assert.doesNotMatch(readme, readmePhrasePattern('Custom Field', 'Body'));
 	assert.match(readme, /summary": null/i);
 	assert.match(readme, /Threat Level/i);
 	assert.match(readme, /First Seen/i);
@@ -806,4 +888,16 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Creator Portal/i);
 	assert.doesNotMatch(readme, /metadata-first/i);
 	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
+});
+
+test('README documents payload input mode contract', () => {
+	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+
+	assert.match(readme, /Input Mode/i);
+	assert.match(readme, /Individual Fields/i);
+	assert.match(readme, /JSON Object/i);
+	assert.match(readme, /full replacement/i);
+	assert.doesNotMatch(readme, readmePhrasePattern('Additional', 'JSON'));
+	assert.doesNotMatch(readme, readmePhrasePattern('merged after', 'structured fields'));
+	assert.doesNotMatch(readme, readmePhrasePattern('legacy', 'fallback'));
 });

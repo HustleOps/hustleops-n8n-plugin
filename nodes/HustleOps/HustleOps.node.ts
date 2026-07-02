@@ -16,7 +16,9 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import {
 	assertPaginatedResponse,
+	compactObject,
 	createHustleOpsApiClient,
+	parseJsonArray,
 	parseJsonObject,
 	parsePositiveInteger,
 	safePathSegment,
@@ -57,6 +59,7 @@ import {
 	type CoreResourceDefinition,
 	type DtoOperation,
 	type FieldSpec,
+	buildGenericSearchRequest,
 	buildSearchRequest,
 	getCoreResourceDefinition,
 	sanitizeDtoBody,
@@ -72,12 +75,21 @@ import {
 	type TagOperation,
 } from './tagDefinitions';
 import {
-	CORE_WRITE_OPERATIONS,
 	createAdditionalFieldsParameterName,
 	fieldDisplayName,
 	structuredFieldParameterName,
 	updateFieldsParameterName,
 } from './structuredCoreFields';
+import {
+	PAYLOAD_INPUT_MODE_OPTIONS,
+	PAYLOAD_INPUT_MODE_PARAMETER,
+	PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+	PAYLOAD_MODE_JSON_OBJECT,
+	type PayloadInputMode,
+	modeDisplayOptions,
+	payloadJsonObjectParameterName,
+	payloadModeDisplayOptions,
+} from './payloadInputMode';
 
 export type CoreOperation = 'search' | 'count' | 'get' | 'create' | 'update';
 export type HustleOpsOperation = CoreOperation | EntityTagOperation;
@@ -100,10 +112,29 @@ const OPERATIONS_WITH_ID: HustleOpsOperation[] = [
 	'addTags',
 	'removeTag',
 ];
-const ADDITIONAL_JSON_PARAMETER = 'additionalJson';
-const LEGACY_BODY_PARAMETER = 'body';
-const OPERATIONS_WITH_SEARCH_BODY: CoreOperation[] = ['search', 'count'];
 const CORE_RESOURCE_VALUES = CORE_RESOURCE_OPTIONS.map((option) => option.value) as CoreResource[];
+const PAYLOAD_OPERATION_VALUES = [
+	'search',
+	'count',
+	'create',
+	'update',
+	'setTags',
+	'addTags',
+	'toggleReaction',
+	'updateColor',
+	'bulkUpdateColor',
+	'bulkDelete',
+	'searchDefinitions',
+	'createGroup',
+	'updateGroup',
+	'createDefinition',
+	'updateDefinition',
+	'bulkUpdateDefinitions',
+	'bulkDeleteDefinitions',
+	'batchGetValues',
+	'replaceValues',
+	'updateSelectedValuesSafely',
+] as const;
 const HUSTLEOPS_RESOURCE_OPTIONS: INodePropertyOptions[] = [
 	...CORE_RESOURCE_OPTIONS,
 	COMMENT_RESOURCE_OPTION,
@@ -249,12 +280,11 @@ function buildCoreCreateRequiredProperties(): INodeProperties[] {
 				true,
 				structuredFieldParameterName(definition.resource, 'create', field),
 			),
-			displayOptions: {
-				show: {
-					resource: [definition.resource],
-					operation: ['create'],
-				},
-			},
+			displayOptions: modeDisplayOptions(
+				[definition.resource],
+				['create'],
+				PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+			),
 		})),
 	);
 }
@@ -269,12 +299,11 @@ function buildCoreCreateAdditionalProperties(): INodeProperties[] {
 		options: definition.createFields
 			.filter((field) => !definition.requiredCreateFields.includes(field))
 			.map((field) => buildFieldProperty(definition, field, false)),
-		displayOptions: {
-			show: {
-				resource: [definition.resource],
-				operation: ['create'],
-			},
-		},
+		displayOptions: modeDisplayOptions(
+			[definition.resource],
+			['create'],
+			PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+		),
 	}));
 }
 
@@ -286,12 +315,11 @@ function buildCoreUpdateFieldProperties(): INodeProperties[] {
 		placeholder: 'Add Field',
 		default: {},
 		options: definition.updateFields.map((field) => buildFieldProperty(definition, field, false)),
-		displayOptions: {
-			show: {
-				resource: [definition.resource],
-				operation: ['update'],
-			},
-		},
+		displayOptions: modeDisplayOptions(
+			[definition.resource],
+			['update'],
+			PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+		),
 	}));
 }
 
@@ -299,20 +327,72 @@ const CORE_CREATE_REQUIRED_PROPERTIES = buildCoreCreateRequiredProperties();
 const CORE_CREATE_ADDITIONAL_PROPERTIES = buildCoreCreateAdditionalProperties();
 const CORE_UPDATE_FIELD_PROPERTIES = buildCoreUpdateFieldProperties();
 
-function shouldOmitStructuredValue(value: unknown): boolean {
-	return value === undefined || value === null || value === '';
+const JSON_OBJECT_PAYLOAD_OPERATIONS: Record<string, readonly string[]> = {
+	alert: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
+	incident: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
+	observable: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
+	knowledge: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
+	comment: ['create', 'update', 'toggleReaction'],
+	tag: ['search', 'create', 'updateColor', 'bulkUpdateColor', 'bulkDelete'],
+	customField: [
+		'searchDefinitions',
+		'createGroup',
+		'updateGroup',
+		'createDefinition',
+		'updateDefinition',
+		'bulkUpdateDefinitions',
+		'bulkDeleteDefinitions',
+		'batchGetValues',
+		'replaceValues',
+		'updateSelectedValuesSafely',
+	],
+};
+
+function buildPayloadJsonObjectProperties(): INodeProperties[] {
+	return Object.entries(JSON_OBJECT_PAYLOAD_OPERATIONS).flatMap(([resource, operations]) =>
+		operations.map((operation) => ({
+			displayName: `${fieldDisplayName(resource)} ${fieldDisplayName(operation)} JSON Object`,
+			name: payloadJsonObjectParameterName(resource, operation),
+			type: 'json' as const,
+			default: '{}',
+			description: 'Complete JSON object to submit as the request body',
+			displayOptions: modeDisplayOptions([resource], [operation], PAYLOAD_MODE_JSON_OBJECT),
+		})),
+	);
 }
 
-function hasStructuredBodyValue(body: IDataObject): boolean {
-	return Object.values(body).some((value) => {
-		if (shouldOmitStructuredValue(value)) {
-			return false;
-		}
-		if (Array.isArray(value)) {
-			return value.length > 0;
-		}
-		return true;
-	});
+const PAYLOAD_JSON_OBJECT_PROPERTIES = buildPayloadJsonObjectProperties();
+const SEARCH_FIELD_DISPLAY_OPTIONS = modeDisplayOptions(
+	[...CORE_RESOURCE_VALUES, 'tag', 'customField'],
+	['search', 'count', 'searchDefinitions'],
+	PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+);
+const TAG_SEARCH_REQUEST_DEFINITION = {
+	displayName: 'Tag',
+	defaultSortBy: 'value',
+	defaultSortOrder: 'asc',
+	searchFields: ['value', 'color', 'createdAt', 'updatedAt'],
+	sortFields: ['value', 'createdAt', 'updatedAt'],
+} as const;
+const CUSTOM_FIELD_DEFINITION_SEARCH_REQUEST_DEFINITION = {
+	displayName: 'Custom Field Definition',
+	defaultSortBy: 'createdAt',
+	defaultSortOrder: 'desc',
+	searchFields: [
+		'name',
+		'description',
+		'fieldType',
+		'entityTypes',
+		'groupId',
+		'isRequired',
+		'createdAt',
+		'updatedAt',
+	],
+	sortFields: ['name', 'fieldType', 'createdAt', 'updatedAt'],
+} as const;
+
+function shouldOmitStructuredValue(value: unknown): boolean {
+	return value === undefined || value === null || value === '';
 }
 
 function normalizeStructuredFieldValue(
@@ -407,6 +487,35 @@ function normalizeMergedDtoBody(
 	return body;
 }
 
+function payloadMode(context: IExecuteFunctions, itemIndex: number): PayloadInputMode {
+	return context.getNodeParameter(
+		PAYLOAD_INPUT_MODE_PARAMETER,
+		itemIndex,
+		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+	) as PayloadInputMode;
+}
+
+function optionalStringParameter(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim() === ''
+		? undefined
+		: (value as string | undefined);
+}
+
+function jsonObjectPayload(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	resource: string,
+	operation: string,
+	label: string,
+): IDataObject {
+	return parseJsonObject(
+		context,
+		context.getNodeParameter(payloadJsonObjectParameterName(resource, operation), itemIndex, '{}'),
+		label,
+		itemIndex,
+	);
+}
+
 function buildStructuredDtoBody(
 	context: IExecuteFunctions,
 	itemIndex: number,
@@ -476,41 +585,318 @@ function buildStructuredDtoBody(
 		}
 	}
 
-	const additionalJson = parseJsonObject(
-		context,
-		context.getNodeParameter(ADDITIONAL_JSON_PARAMETER, itemIndex, '{}'),
-		'Additional JSON',
-		itemIndex,
-	);
-
-	if (!hasStructuredBodyValue(structuredBody) && Object.keys(additionalJson).length === 0) {
-		const legacyBody = parseJsonObject(
-			context,
-			context.getNodeParameter(LEGACY_BODY_PARAMETER, itemIndex, '{}'),
-			'Body',
-			itemIndex,
-		);
-		if (Object.keys(legacyBody).length > 0) {
-			return sanitizeDtoBody(definition, operation, legacyBody);
-		}
-	}
-
-	const additionalJsonFields = new Set(Object.keys(additionalJson));
-	const structuredOnlyFields = new Set(
-		[...structuredFields].filter((field) => !additionalJsonFields.has(field)),
-	);
-	const mergedBody = normalizeMergedDtoBody(
-		context,
-		{ ...structuredBody, ...additionalJson },
-		definition,
-		itemIndex,
-	);
+	const normalizedBody = normalizeMergedDtoBody(context, structuredBody, definition, itemIndex);
 
 	try {
-		return sanitizeDtoBody(definition, operation, mergedBody);
+		return sanitizeDtoBody(definition, operation, normalizedBody);
 	} catch (error) {
-		labelStructuredDtoError(context, error, structuredOnlyFields, itemIndex);
+		labelStructuredDtoError(context, error, structuredFields, itemIndex);
 	}
+}
+
+function buildCoreDtoBody(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	definition: CoreResourceDefinition,
+	operation: DtoOperation,
+): IDataObject {
+	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
+		return sanitizeDtoBody(
+			definition,
+			operation,
+			jsonObjectPayload(
+				context,
+				itemIndex,
+				definition.resource,
+				operation,
+				`${definition.displayName} ${operation} JSON Object`,
+			),
+		);
+	}
+	return buildStructuredDtoBody(context, itemIndex, definition, operation);
+}
+
+function buildSearchFieldsBody(context: IExecuteFunctions, itemIndex: number): IDataObject {
+	const filter = parseJsonObject(
+		context,
+		context.getNodeParameter('payloadSearchFilter', itemIndex, '{}'),
+		'Filter',
+		itemIndex,
+	);
+	const excludeIds = parseJsonArray(
+		context,
+		context.getNodeParameter('payloadSearchExcludeIds', itemIndex, '[]'),
+		'Exclude IDs',
+		itemIndex,
+	);
+
+	return compactObject({
+		filter: Object.keys(filter).length === 0 ? undefined : filter,
+		excludeIds: excludeIds.length === 0 ? undefined : excludeIds,
+		pagination: {
+			page: context.getNodeParameter('payloadSearchPage', itemIndex, 1),
+			pageSize: context.getNodeParameter('payloadSearchPageSize', itemIndex, 25),
+			sortBy: optionalStringParameter(
+				context.getNodeParameter('payloadSearchSortBy', itemIndex, ''),
+			),
+			sortOrder: optionalStringParameter(
+				context.getNodeParameter('payloadSearchSortOrder', itemIndex, ''),
+			),
+		},
+	});
+}
+
+function buildCoreSearchBody(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	definition: CoreResourceDefinition,
+	operation: 'search' | 'count',
+): IDataObject {
+	const input =
+		payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT
+			? jsonObjectPayload(
+					context,
+					itemIndex,
+					definition.resource,
+					operation,
+					`${definition.displayName} ${operation} JSON Object`,
+				)
+			: buildSearchFieldsBody(context, itemIndex);
+	return buildSearchRequest(definition, input);
+}
+
+function buildCommentPayload(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	operation: CommentOperation,
+): IDataObject {
+	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
+		return jsonObjectPayload(context, itemIndex, 'comment', operation, 'Comment JSON Object');
+	}
+	if (operation === 'create') {
+		const attachmentIds = parseJsonArray(
+			context,
+			context.getNodeParameter('payloadCommentAttachmentIds', itemIndex, '[]'),
+			'Comment Attachment IDs',
+			itemIndex,
+		);
+		return compactObject({
+			content: optionalStringParameter(
+				context.getNodeParameter('payloadCommentContent', itemIndex, ''),
+			),
+			parentId: optionalStringParameter(
+				context.getNodeParameter('payloadCommentParentId', itemIndex, ''),
+			),
+			attachmentIds: attachmentIds.length === 0 ? undefined : attachmentIds,
+		});
+	}
+	if (operation === 'update') {
+		return { content: context.getNodeParameter('payloadCommentContent', itemIndex, '') };
+	}
+	if (operation === 'toggleReaction') {
+		return { emoji: context.getNodeParameter('payloadCommentEmoji', itemIndex, '') };
+	}
+	return {};
+}
+
+function buildTagPayload(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	operation: TagOperation,
+): IDataObject {
+	if (operation === 'search') {
+		const input =
+			payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT
+				? jsonObjectPayload(context, itemIndex, 'tag', operation, 'Tag JSON Object')
+				: buildSearchFieldsBody(context, itemIndex);
+		return buildGenericSearchRequest(TAG_SEARCH_REQUEST_DEFINITION, input);
+	}
+	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
+		return jsonObjectPayload(context, itemIndex, 'tag', operation, 'Tag JSON Object');
+	}
+	if (operation === 'create') {
+		return compactObject({
+			value: context.getNodeParameter('payloadTagValue', itemIndex, ''),
+			color: optionalStringParameter(context.getNodeParameter('payloadTagColor', itemIndex, '')),
+		});
+	}
+	if (operation === 'updateColor') {
+		return { color: context.getNodeParameter('payloadTagColor', itemIndex, '') };
+	}
+	if (operation === 'bulkUpdateColor') {
+		return compactObject({
+			ids: parseJsonArray(
+				context,
+				context.getNodeParameter('payloadTagIds', itemIndex, '[]'),
+				'Tag IDs',
+				itemIndex,
+			),
+			color: optionalStringParameter(context.getNodeParameter('payloadTagColor', itemIndex, '')),
+		});
+	}
+	if (operation === 'bulkDelete') {
+		return compactObject({
+			ids: parseJsonArray(
+				context,
+				context.getNodeParameter('payloadTagIds', itemIndex, '[]'),
+				'Tag IDs',
+				itemIndex,
+			),
+			force: context.getNodeParameter('payloadTagForce', itemIndex, undefined),
+		});
+	}
+	return {};
+}
+
+function buildEntityTagBody(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	resource: CoreResource,
+	operation: EntityTagOperation,
+): IDataObject {
+	const operationLabel = operation === 'setTags' ? 'Set Tags' : 'Add Tags';
+	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
+		const body = jsonObjectPayload(
+			context,
+			itemIndex,
+			resource,
+			operation,
+			`${operationLabel} JSON Object`,
+		);
+		parseEntityTagValues(context, body.values, operationLabel, itemIndex);
+		return body;
+	}
+	return {
+		values: parseEntityTagValues(
+			context,
+			context.getNodeParameter('payloadEntityTagValues', itemIndex, '[]'),
+			operationLabel,
+			itemIndex,
+		),
+	};
+}
+
+function buildCustomFieldBodyPayload(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	operation: CustomFieldOperation,
+): IDataObject {
+	if (operation === 'searchDefinitions') {
+		const input =
+			payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT
+				? jsonObjectPayload(
+						context,
+						itemIndex,
+						'customField',
+						operation,
+						'Custom Field Definition Search JSON Object',
+					)
+				: buildSearchFieldsBody(context, itemIndex);
+		return buildGenericSearchRequest(CUSTOM_FIELD_DEFINITION_SEARCH_REQUEST_DEFINITION, input);
+	}
+	if (
+		operation === 'batchGetValues' &&
+		payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT
+	) {
+		return customFieldBatchBody(
+			context,
+			jsonObjectPayload(
+				context,
+				itemIndex,
+				'customField',
+				operation,
+				'Custom Field Batch Get Values JSON Object',
+			),
+			itemIndex,
+		);
+	}
+	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
+		return jsonObjectPayload(
+			context,
+			itemIndex,
+			'customField',
+			operation,
+			'Custom Field JSON Object',
+		);
+	}
+	if (operation === 'createGroup' || operation === 'updateGroup') {
+		return parseJsonObject(
+			context,
+			context.getNodeParameter('payloadCustomFieldGroupFields', itemIndex, '{}'),
+			'Custom Field Group Fields',
+			itemIndex,
+		);
+	}
+	if (operation === 'createDefinition' || operation === 'updateDefinition') {
+		return parseJsonObject(
+			context,
+			context.getNodeParameter('payloadCustomFieldDefinitionFields', itemIndex, '{}'),
+			'Custom Field Definition Fields',
+			itemIndex,
+		);
+	}
+	if (operation === 'bulkUpdateDefinitions') {
+		return parseJsonObject(
+			context,
+			context.getNodeParameter('payloadCustomFieldDefinitionBulkFields', itemIndex, '{}'),
+			'Custom Field Definition Bulk Fields',
+			itemIndex,
+		);
+	}
+	if (operation === 'bulkDeleteDefinitions') {
+		return compactObject({
+			ids: parseJsonArray(
+				context,
+				context.getNodeParameter('payloadCustomFieldDefinitionIds', itemIndex, '[]'),
+				'Custom Field Definition IDs',
+				itemIndex,
+			),
+			force: context.getNodeParameter('force', itemIndex, undefined),
+		});
+	}
+	if (operation === 'batchGetValues') {
+		return customFieldBatchBody(
+			context,
+			{
+				entityType: context.getNodeParameter('entityType', itemIndex),
+				entityIds: context.getNodeParameter('payloadCustomFieldEntityIds', itemIndex, '[]'),
+			},
+			itemIndex,
+		);
+	}
+	return {};
+}
+
+function customFieldPayloadRows(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	operation: 'replaceValues' | 'updateSelectedValuesSafely',
+): unknown[] {
+	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
+		const body = jsonObjectPayload(
+			context,
+			itemIndex,
+			'customField',
+			operation,
+			'Custom Field Values JSON Object',
+		);
+		if (!Array.isArray(body.values)) {
+			throw new NodeOperationError(
+				context.getNode(),
+				'Custom Field Values JSON Object must include a values array.',
+				{
+					itemIndex,
+				},
+			);
+		}
+		return body.values;
+	}
+	return parseJsonArray(
+		context,
+		context.getNodeParameter('payloadCustomFieldValues', itemIndex, '[]'),
+		'Custom Field Values',
+		itemIndex,
+	);
 }
 
 async function executeCommentOperation(
@@ -617,12 +1003,7 @@ async function executeCommentOperation(
 				entityType: context.getNodeParameter('entityType', itemIndex),
 				entityId: context.getNodeParameter('entityId', itemIndex),
 			},
-			parseJsonObject(
-				context,
-				context.getNodeParameter('commentBody', itemIndex),
-				'Comment Body',
-				itemIndex,
-			),
+			buildCommentPayload(context, itemIndex, operation),
 			itemIndex,
 		);
 		const client = await createHustleOpsApiClient(context, itemIndex);
@@ -654,12 +1035,7 @@ async function executeCommentOperation(
 	if (operation === 'update') {
 		const body = sanitizeUpdateComment(
 			context,
-			parseJsonObject(
-				context,
-				context.getNodeParameter('commentBody', itemIndex),
-				'Comment Body',
-				itemIndex,
-			),
+			buildCommentPayload(context, itemIndex, operation),
 			itemIndex,
 		);
 		const client = await createHustleOpsApiClient(context, itemIndex);
@@ -678,12 +1054,7 @@ async function executeCommentOperation(
 	if (operation === 'toggleReaction') {
 		const body = sanitizeToggleReaction(
 			context,
-			parseJsonObject(
-				context,
-				context.getNodeParameter('commentBody', itemIndex),
-				'Comment Body',
-				itemIndex,
-			),
+			buildCommentPayload(context, itemIndex, operation),
 			itemIndex,
 		);
 		const client = await createHustleOpsApiClient(context, itemIndex);
@@ -787,9 +1158,8 @@ async function executeTagOperation(
 	operation: TagOperation,
 	returnData: INodeExecutionData[],
 ): Promise<void> {
-	const client = await createHustleOpsApiClient(context, itemIndex);
-
 	if (operation === 'list') {
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject[] | IDataObject>('GET', '/tags', undefined, {
 			withCounts: context.getNodeParameter('withCounts', itemIndex, false) as boolean,
 		});
@@ -800,6 +1170,7 @@ async function executeTagOperation(
 	if (operation === 'delete') {
 		const tagId = safePathSegment(context.getNodeParameter('tagId', itemIndex) as string, 'Tag ID');
 		const force = context.getNodeParameter('force', itemIndex, false) as boolean;
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject>('DELETE', `/tags/${tagId}`, undefined, {
 			force: force ? true : undefined,
 		});
@@ -807,12 +1178,8 @@ async function executeTagOperation(
 		return;
 	}
 
-	const body = parseJsonObject(
-		context,
-		context.getNodeParameter('tagBody', itemIndex, '{}'),
-		'Tag Body',
-		itemIndex,
-	);
+	const body = buildTagPayload(context, itemIndex, operation);
+	const client = await createHustleOpsApiClient(context, itemIndex);
 
 	if (operation === 'search') {
 		const response = await client.request<IDataObject>('POST', '/tags/search', body);
@@ -852,16 +1219,10 @@ async function executeTagOperation(
 	}
 
 	if (operation === 'bulkDelete') {
-		const force = context.getNodeParameter('force', itemIndex, undefined) as boolean | undefined;
 		const response = await client.request<IDataObject>(
 			'POST',
 			'/tags/bulk-delete',
-			sanitizeTagBody(
-				context,
-				operation,
-				force === undefined || body.force !== undefined ? body : { ...body, force },
-				itemIndex,
-			),
+			sanitizeTagBody(context, operation, body, itemIndex),
 		);
 		pushResponse(returnData, response, itemIndex);
 		return;
@@ -884,10 +1245,10 @@ async function executeEntityTagOperation(
 		context.getNodeParameter('id', itemIndex) as string,
 		`${definition.displayName} ID`,
 	);
-	const client = await createHustleOpsApiClient(context, itemIndex);
 
 	if (operation === 'removeTag') {
 		const tagId = safePathSegment(context.getNodeParameter('tagId', itemIndex) as string, 'Tag ID');
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject>(
 			'DELETE',
 			`${definition.path}/${entityId}/tags/${tagId}`,
@@ -896,16 +1257,12 @@ async function executeEntityTagOperation(
 		return;
 	}
 
-	const values = parseEntityTagValues(
-		context,
-		context.getNodeParameter('tagValues', itemIndex, '[]'),
-		operation === 'setTags' ? 'Set Tags' : 'Add Tags',
-		itemIndex,
-	);
+	const body = buildEntityTagBody(context, itemIndex, resource, operation);
+	const client = await createHustleOpsApiClient(context, itemIndex);
 	const response = await client.request<IDataObject>(
 		operation === 'setTags' ? 'PUT' : 'POST',
 		`${definition.path}/${entityId}/tags`,
-		{ values },
+		body,
 	);
 	pushResponse(returnData, response, itemIndex);
 }
@@ -916,14 +1273,14 @@ async function executeCustomFieldOperation(
 	operation: CustomFieldOperation,
 	returnData: INodeExecutionData[],
 ): Promise<void> {
-	const client = await createHustleOpsApiClient(context, itemIndex);
-
 	if (operation === 'listGroups') {
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		pushResponse(returnData, await client.request('GET', '/custom-fields/groups'), itemIndex);
 		return;
 	}
 
 	if (operation === 'listDefinitions') {
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		pushResponse(returnData, await client.request('GET', '/custom-fields/definitions'), itemIndex);
 		return;
 	}
@@ -934,6 +1291,7 @@ async function executeCustomFieldOperation(
 			'Custom field group ID',
 		);
 		const force = context.getNodeParameter('force', itemIndex, false) as boolean;
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject>(
 			'DELETE',
 			`/custom-fields/groups/${groupId}`,
@@ -950,6 +1308,7 @@ async function executeCustomFieldOperation(
 			'Custom field definition ID',
 		);
 		const force = context.getNodeParameter('force', itemIndex, false) as boolean;
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject>(
 			'DELETE',
 			`/custom-fields/definitions/${definitionId}`,
@@ -971,6 +1330,7 @@ async function executeCustomFieldOperation(
 		);
 		const pathPrefix =
 			operation === 'getValues' ? '/custom-fields/values' : '/custom-fields/available';
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject>(
 			'GET',
 			`${pathPrefix}/${scope.entityType}/${safePathSegment(scope.entityId, 'Custom field entity ID')}`,
@@ -980,14 +1340,8 @@ async function executeCustomFieldOperation(
 	}
 
 	if (operation === 'batchGetValues') {
-		const body = customFieldBatchBody(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityIds: context.getNodeParameter('entityIds', itemIndex),
-			},
-			itemIndex,
-		);
+		const body = buildCustomFieldBodyPayload(context, itemIndex, operation);
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const response = await client.request<IDataObject>('POST', '/custom-fields/values/batch', body);
 		pushResponse(returnData, response, itemIndex);
 		return;
@@ -1004,7 +1358,7 @@ async function executeCustomFieldOperation(
 		);
 		const selectedValues = parseCustomFieldValues(
 			context,
-			context.getNodeParameter('customFieldValues', itemIndex, '[]'),
+			customFieldPayloadRows(context, itemIndex, operation),
 			itemIndex,
 		);
 		if (operation === 'updateSelectedValuesSafely' && selectedValues.length === 0) {
@@ -1018,6 +1372,7 @@ async function executeCustomFieldOperation(
 			scope.entityId,
 			'Custom field entity ID',
 		)}`;
+		const client = await createHustleOpsApiClient(context, itemIndex);
 		const values =
 			operation === 'replaceValues'
 				? selectedValues
@@ -1030,12 +1385,8 @@ async function executeCustomFieldOperation(
 		return;
 	}
 
-	const body = parseJsonObject(
-		context,
-		context.getNodeParameter('customFieldBody', itemIndex, '{}'),
-		'Custom Field Body',
-		itemIndex,
-	);
+	const body = buildCustomFieldBodyPayload(context, itemIndex, operation);
+	const client = await createHustleOpsApiClient(context, itemIndex);
 
 	if (operation === 'searchDefinitions') {
 		pushPaginatedRows(
@@ -1106,15 +1457,10 @@ async function executeCustomFieldOperation(
 	}
 
 	if (operation === 'bulkDeleteDefinitions') {
-		const force = context.getNodeParameter('force', itemIndex, undefined) as boolean | undefined;
 		const response = await client.request<IDataObject>(
 			'POST',
 			'/custom-fields/definitions/bulk-delete',
-			sanitizeCustomFieldDefinitionBulkDelete(
-				context,
-				force === undefined || body.force !== undefined ? body : { ...body, force },
-				itemIndex,
-			),
+			sanitizeCustomFieldDefinitionBulkDelete(context, body, itemIndex),
 		);
 		pushResponse(returnData, response, itemIndex);
 		return;
@@ -1224,49 +1570,89 @@ export class HustleOps implements INodeType {
 					},
 				},
 			},
+			{
+				displayName: 'Input Mode',
+				name: PAYLOAD_INPUT_MODE_PARAMETER,
+				type: 'options',
+				default: PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				options: [...PAYLOAD_INPUT_MODE_OPTIONS],
+				displayOptions: payloadModeDisplayOptions(
+					[...CORE_RESOURCE_VALUES, 'comment', 'tag', 'customField'],
+					PAYLOAD_OPERATION_VALUES,
+				),
+			},
 			...CORE_CREATE_REQUIRED_PROPERTIES,
 			...CORE_CREATE_ADDITIONAL_PROPERTIES,
 			...CORE_UPDATE_FIELD_PROPERTIES,
+			...PAYLOAD_JSON_OBJECT_PROPERTIES,
 			{
-				displayName: 'Additional JSON',
-				name: ADDITIONAL_JSON_PARAMETER,
+				displayName: 'Filter',
+				name: 'payloadSearchFilter',
 				type: 'json',
 				default: '{}',
-				description:
-					'Additional JSON object for advanced Create or Update payload fields. Values are merged after structured fields and override duplicate structured field names.',
-				displayOptions: {
-					show: {
-						resource: CORE_RESOURCE_VALUES,
-						operation: CORE_WRITE_OPERATIONS,
-					},
-				},
+				description: 'Optional search filter object. Leave {} to omit the filter.',
+				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
 			},
 			{
-				displayName: 'Legacy Body',
-				name: LEGACY_BODY_PARAMETER,
-				type: 'hidden',
-				default: '{}',
-				description:
-					'Hidden legacy compatibility field for workflows saved before structured create and update fields were added',
-				displayOptions: {
-					show: {
-						resource: CORE_RESOURCE_VALUES,
-						operation: CORE_WRITE_OPERATIONS,
-					},
+				displayName: 'Page',
+				name: 'payloadSearchPage',
+				type: 'number',
+				typeOptions: {
+					minValue: 1,
 				},
+				default: 1,
+				description: 'Search result page to request',
+				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
 			},
 			{
-				displayName: 'Search Body',
-				name: 'searchBody',
+				displayName: 'Page Size',
+				name: 'payloadSearchPageSize',
+				type: 'number',
+				typeOptions: {
+					minValue: 1,
+					maxValue: 100,
+				},
+				default: 25,
+				description: 'Number of search rows to request per page',
+				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
+			},
+			{
+				displayName: 'Sort By',
+				name: 'payloadSearchSortBy',
+				type: 'string',
+				default: '',
+				description: 'Optional sort field. Leave empty to use the resource default.',
+				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
+			},
+			{
+				displayName: 'Sort Order',
+				name: 'payloadSearchSortOrder',
+				type: 'options',
+				default: '',
+				options: [
+					{
+						name: 'Default',
+						value: '',
+					},
+					{
+						name: 'Ascending',
+						value: 'asc',
+					},
+					{
+						name: 'Descending',
+						value: 'desc',
+					},
+				],
+				description: 'Optional sort direction. Leave empty to use the resource default.',
+				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
+			},
+			{
+				displayName: 'Exclude IDs',
+				name: 'payloadSearchExcludeIds',
 				type: 'json',
-				default: '{"pagination":{"page":1,"pageSize":25}}',
-				description: 'JSON search request for HustleOps Search or Count operations',
-				displayOptions: {
-					show: {
-						resource: CORE_RESOURCE_VALUES,
-						operation: OPERATIONS_WITH_SEARCH_BODY,
-					},
-				},
+				default: '[]',
+				description: 'Optional JSON array of entity UUIDs to exclude from search results',
+				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
 			},
 			{
 				displayName: 'Return All',
@@ -1345,32 +1731,58 @@ export class HustleOps implements INodeType {
 				},
 			},
 			{
-				displayName: 'Tag Body',
-				name: 'tagBody',
-				type: 'json',
-				default: '{}',
-				description:
-					'JSON body for tag search, create, color update, bulk color update, or bulk delete operations',
-				displayOptions: {
-					show: {
-						resource: ['tag'],
-						operation: ['search', 'create', 'updateColor', 'bulkUpdateColor', 'bulkDelete'],
-					},
-				},
-			},
-			{
 				displayName: 'Tag Values',
-				name: 'tagValues',
+				name: 'payloadEntityTagValues',
 				type: 'json',
 				default: '[]',
 				description:
 					'JSON array of tag values. Set Tags accepts an empty array to clear all tags; Add Tags requires at least one value.',
-				displayOptions: {
-					show: {
-						resource: CORE_RESOURCE_VALUES,
-						operation: ['setTags', 'addTags'],
-					},
-				},
+				displayOptions: modeDisplayOptions(
+					CORE_RESOURCE_VALUES,
+					['setTags', 'addTags'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Tag Value',
+				name: 'payloadTagValue',
+				type: 'string',
+				default: '',
+				required: true,
+				description: 'Tag value',
+				displayOptions: modeDisplayOptions(['tag'], ['create'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
+			},
+			{
+				displayName: 'Tag Color',
+				name: 'payloadTagColor',
+				type: 'string',
+				default: '',
+				description: 'Optional tag color',
+				displayOptions: modeDisplayOptions(
+					['tag'],
+					['create', 'updateColor', 'bulkUpdateColor'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Tag IDs',
+				name: 'payloadTagIds',
+				type: 'json',
+				default: '[]',
+				description: 'JSON array of tag UUIDs',
+				displayOptions: modeDisplayOptions(
+					['tag'],
+					['bulkUpdateColor', 'bulkDelete'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Force',
+				name: 'payloadTagForce',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to force bulk deletion',
+				displayOptions: modeDisplayOptions(['tag'], ['bulkDelete'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
 			},
 			{
 				displayName: 'Tag Name or ID',
@@ -1400,50 +1812,83 @@ export class HustleOps implements INodeType {
 				displayOptions: {
 					show: {
 						resource: ['tag', 'customField'],
-						operation: [
-							'delete',
-							'bulkDelete',
-							'deleteGroup',
-							'deleteDefinition',
-							'bulkDeleteDefinitions',
-						],
+						operation: ['delete', 'deleteGroup', 'deleteDefinition', 'bulkDeleteDefinitions'],
 					},
 				},
 			},
 			{
-				displayName: 'Custom Field Body',
-				name: 'customFieldBody',
+				displayName: 'Custom Field Group Fields',
+				name: 'payloadCustomFieldGroupFields',
 				type: 'json',
 				default: '{}',
-				description: 'JSON body for custom field group and definition administration operations',
-				displayOptions: {
-					show: {
-						resource: ['customField'],
-						operation: [
-							'createGroup',
-							'updateGroup',
-							'searchDefinitions',
-							'createDefinition',
-							'updateDefinition',
-							'bulkUpdateDefinitions',
-							'bulkDeleteDefinitions',
-						],
-					},
-				},
+				description: 'Custom field group fields as a JSON object',
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['createGroup', 'updateGroup'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Custom Field Definition Fields',
+				name: 'payloadCustomFieldDefinitionFields',
+				type: 'json',
+				default: '{}',
+				description: 'Custom field definition fields as a JSON object',
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['createDefinition', 'updateDefinition'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Custom Field Definition Bulk Fields',
+				name: 'payloadCustomFieldDefinitionBulkFields',
+				type: 'json',
+				default: '{}',
+				description: 'Custom field definition bulk update fields as a JSON object',
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['bulkUpdateDefinitions'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Custom Field Definition IDs',
+				name: 'payloadCustomFieldDefinitionIds',
+				type: 'json',
+				default: '[]',
+				description: 'JSON array of custom field definition UUIDs',
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['bulkDeleteDefinitions'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
 			},
 			{
 				displayName: 'Custom Field Values',
-				name: 'customFieldValues',
+				name: 'payloadCustomFieldValues',
 				type: 'json',
 				default: '[]',
 				description:
 					'JSON array of { fieldId, value, fieldType? } objects. Array values are serialized as MULTI_SELECT JSON strings before sending.',
-				displayOptions: {
-					show: {
-						resource: ['customField'],
-						operation: ['replaceValues', 'updateSelectedValuesSafely'],
-					},
-				},
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['replaceValues', 'updateSelectedValuesSafely'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Entity IDs',
+				name: 'payloadCustomFieldEntityIds',
+				type: 'json',
+				default: '[]',
+				required: true,
+				description: 'JSON array of up to 100 entity UUIDs for batch custom field values',
+				displayOptions: modeDisplayOptions(
+					['customField'],
+					['batchGetValues'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
 			},
 			{
 				displayName: 'Custom Field Group ID',
@@ -1474,20 +1919,6 @@ export class HustleOps implements INodeType {
 					show: {
 						resource: ['customField'],
 						operation: ['updateDefinition', 'deleteDefinition'],
-					},
-				},
-			},
-			{
-				displayName: 'Entity IDs',
-				name: 'entityIds',
-				type: 'json',
-				default: '[]',
-				required: true,
-				description: 'JSON array of up to 100 entity UUIDs for batch custom field values',
-				displayOptions: {
-					show: {
-						resource: ['customField'],
-						operation: ['batchGetValues'],
 					},
 				},
 			},
@@ -1619,19 +2050,40 @@ export class HustleOps implements INodeType {
 				},
 			},
 			{
-				displayName: 'Comment Body',
-				name: 'commentBody',
+				displayName: 'Content',
+				name: 'payloadCommentContent',
+				type: 'string',
+				default: '',
+				displayOptions: modeDisplayOptions(
+					['comment'],
+					['create', 'update'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'Parent ID',
+				name: 'payloadCommentParentId',
+				type: 'string',
+				default: '',
+				displayOptions: modeDisplayOptions(['comment'], ['create'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
+			},
+			{
+				displayName: 'Attachment IDs',
+				name: 'payloadCommentAttachmentIds',
 				type: 'json',
-				default: '{}',
-				required: true,
-				description:
-					'JSON body for comment create, update, or reaction operations. Create accepts content, parentId, and attachmentIds. Update accepts content. Toggle Reaction accepts emoji.',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['create', 'update', 'toggleReaction'],
-					},
-				},
+				default: '[]',
+				displayOptions: modeDisplayOptions(['comment'], ['create'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
+			},
+			{
+				displayName: 'Emoji',
+				name: 'payloadCommentEmoji',
+				type: 'string',
+				default: '',
+				displayOptions: modeDisplayOptions(
+					['comment'],
+					['toggleReaction'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
 			},
 			{
 				displayName: 'Include Cursor Metadata',
@@ -1740,7 +2192,7 @@ export class HustleOps implements INodeType {
 				}
 
 				if (coreOperation === 'create') {
-					const body = buildStructuredDtoBody(this, itemIndex, definition, 'create');
+					const body = buildCoreDtoBody(this, itemIndex, definition, 'create');
 					const client = await createHustleOpsApiClient(this, itemIndex);
 					const response = await client.request<IDataObject>('POST', definition.path, body);
 					returnData.push({ json: response, pairedItem: { item: itemIndex } });
@@ -1750,7 +2202,7 @@ export class HustleOps implements INodeType {
 				if (coreOperation === 'update') {
 					const id = this.getNodeParameter('id', itemIndex) as string;
 					const entityId = safePathSegment(id, `${definition.displayName} ID`);
-					const body = buildStructuredDtoBody(this, itemIndex, definition, 'update');
+					const body = buildCoreDtoBody(this, itemIndex, definition, 'update');
 					const client = await createHustleOpsApiClient(this, itemIndex);
 					const response = await client.request<IDataObject>(
 						'PATCH',
@@ -1761,15 +2213,7 @@ export class HustleOps implements INodeType {
 					continue;
 				}
 
-				const searchBody = buildSearchRequest(
-					definition,
-					parseJsonObject(
-						this,
-						this.getNodeParameter('searchBody', itemIndex, '{}'),
-						'Search Body',
-						itemIndex,
-					),
-				);
+				const searchRequestBody = buildCoreSearchBody(this, itemIndex, definition, coreOperation);
 
 				const client = await createHustleOpsApiClient(this, itemIndex);
 
@@ -1777,7 +2221,7 @@ export class HustleOps implements INodeType {
 					const response = await client.request<IDataObject>(
 						'POST',
 						`${definition.path}/count`,
-						searchBody,
+						searchRequestBody,
 					);
 					returnData.push({ json: response, pairedItem: { item: itemIndex } });
 					continue;
@@ -1799,7 +2243,7 @@ export class HustleOps implements INodeType {
 					);
 					await client.requestEachPage(
 						`${definition.path}/search`,
-						searchBody,
+						searchRequestBody,
 						{ maxItems, maxPages },
 						(row) => returnData.push({ json: row, pairedItem: { item: itemIndex } }),
 					);
@@ -1807,7 +2251,7 @@ export class HustleOps implements INodeType {
 				}
 
 				const response = assertPaginatedResponse(
-					await client.request('POST', `${definition.path}/search`, searchBody),
+					await client.request('POST', `${definition.path}/search`, searchRequestBody),
 					`${definition.displayName} search response`,
 				);
 
