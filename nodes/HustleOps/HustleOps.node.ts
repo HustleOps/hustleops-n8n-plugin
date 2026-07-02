@@ -209,11 +209,7 @@ function fieldDescription(
 	if (spec.type === 'enum' && spec.allowedValues) {
 		constraints.push(`Supported values: ${spec.allowedValues.join(', ')}.`);
 	}
-	return [
-		`${definition.displayName} ${fieldDisplayName(field)}.`,
-		spec.description,
-		...constraints,
-	]
+	return [`${definition.displayName} ${fieldDisplayName(field)}.`, spec.description, ...constraints]
 		.filter(Boolean)
 		.join(' ');
 }

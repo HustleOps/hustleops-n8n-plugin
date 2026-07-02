@@ -246,8 +246,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'status',
 				type: 'string',
 				nonEmpty: true,
-				description:
-					'Must match an active alertStatus picklist value in HustleOps when provided.',
+				description: 'Must match an active alertStatus picklist value in HustleOps when provided.',
 			},
 			detectedAt: { name: 'detectedAt', type: 'date-time', requiredForCreate: true },
 			incidentId: { name: 'incidentId', type: 'uuid' },

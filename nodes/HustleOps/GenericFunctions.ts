@@ -186,7 +186,9 @@ function getErrorBody(error: unknown): IDataObject {
 				}
 			} catch {
 				return {
-					...(maybeError.response?.statusCode ? { statusCode: maybeError.response.statusCode } : {}),
+					...(maybeError.response?.statusCode
+						? { statusCode: maybeError.response.statusCode }
+						: {}),
 					message: body,
 				};
 			}
