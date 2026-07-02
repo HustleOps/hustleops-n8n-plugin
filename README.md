@@ -342,7 +342,7 @@ docs: update release runbook
 chore(release): v0.1.2
 ```
 
-Releases are created from GitHub Actions with the manual `Release` workflow. Run the workflow with a stable tag input such as:
+Releases are created from GitHub Actions with the manual `Release` workflow. Run the workflow from `main` with a stable tag input such as:
 
 ```text
 v0.1.2

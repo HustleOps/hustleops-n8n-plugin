@@ -29,6 +29,14 @@ jobs:
       NPM_CONFIG_PROVENANCE: 'true'
 
     steps:
+      - name: Require release workflow from main
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Release workflow must be run from main. Re-run this workflow with branch 'main' selected."
+            exit 1
+          fi
+
       - name: Check out main
         uses: actions/checkout@v4
         with:

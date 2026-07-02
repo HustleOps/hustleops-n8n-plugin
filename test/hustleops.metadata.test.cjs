@@ -639,6 +639,9 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /id-token:\s*write/);
 	assert.match(releaseWorkflow, /packages:\s*write/);
 	assert.match(releaseWorkflow, /cancel-in-progress:\s*false/);
+	assert.match(releaseWorkflow, /name:\s*Require release workflow from main/);
+	assert.match(releaseWorkflow, /\$GITHUB_REF" != "refs\/heads\/main"/);
+	assert.match(releaseWorkflow, /Release workflow must be run from main/);
 	assert.match(releaseWorkflow, /release-prepare\.cjs --release-tag/);
 	assert.match(releaseWorkflow, /release_already_prepared/);
 	assert.match(
