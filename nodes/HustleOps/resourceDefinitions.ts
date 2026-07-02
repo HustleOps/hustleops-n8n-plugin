@@ -33,6 +33,14 @@ export type CoreResourceDefinition = {
 	fieldSpecs: Readonly<Record<string, FieldSpec>>;
 };
 
+export type SearchRequestDefinition = {
+	displayName: string;
+	defaultSortBy: string;
+	defaultSortOrder: 'asc' | 'desc';
+	searchFields: readonly string[];
+	sortFields: readonly string[];
+};
+
 const SEARCH_REQUEST_FIELDS = new Set(['filter', 'pagination', 'excludeIds']);
 const SEARCH_PAGINATION_FIELDS = new Set(['page', 'pageSize', 'sortBy', 'sortOrder']);
 const SEARCH_OPERATORS = new Set([
@@ -555,7 +563,7 @@ export function sanitizeDtoBody(
 }
 
 function assertAllowedKeys(
-	definition: CoreResourceDefinition,
+	definition: SearchRequestDefinition,
 	label: string,
 	value: IDataObject,
 	allowedKeys: Set<string>,
@@ -567,7 +575,7 @@ function assertAllowedKeys(
 	}
 }
 
-function validateExcludeIds(definition: CoreResourceDefinition, value: unknown): void {
+function validateExcludeIds(definition: SearchRequestDefinition, value: unknown): void {
 	if (value === undefined) {
 		return;
 	}
@@ -580,7 +588,7 @@ function validateExcludeIds(definition: CoreResourceDefinition, value: unknown):
 }
 
 function validateSearchFilter(
-	definition: CoreResourceDefinition,
+	definition: SearchRequestDefinition,
 	value: unknown,
 	depth = 0,
 	state = { groups: 0, conditions: 0 },
@@ -676,15 +684,17 @@ function validateSearchFilter(
 	}
 }
 
-export function buildSearchRequest(
-	definition: CoreResourceDefinition,
+export function buildGenericSearchRequest(
+	definition: SearchRequestDefinition,
 	input: IDataObject,
 ): IDataObject {
 	assertAllowedKeys(definition, 'search request', input, SEARCH_REQUEST_FIELDS);
 	const pagination = (input.pagination ?? {}) as IDataObject;
 	assertAllowedKeys(definition, 'search pagination', pagination, SEARCH_PAGINATION_FIELDS);
 	const sortBy =
-		typeof pagination.sortBy === 'string' ? pagination.sortBy : definition.defaultSortBy;
+		typeof pagination.sortBy === 'string' && pagination.sortBy !== ''
+			? pagination.sortBy
+			: definition.defaultSortBy;
 	const sortOrder =
 		pagination.sortOrder === 'asc' || pagination.sortOrder === 'desc'
 			? pagination.sortOrder
@@ -719,4 +729,11 @@ export function buildSearchRequest(
 			sortOrder,
 		},
 	});
+}
+
+export function buildSearchRequest(
+	definition: CoreResourceDefinition,
+	input: IDataObject,
+): IDataObject {
+	return buildGenericSearchRequest(definition, input);
 }
