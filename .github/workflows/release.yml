@@ -1,0 +1,221 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Stable release tag, for example v0.1.2'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release / Publish
+    runs-on: ubuntu-latest
+
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      PACKAGE_NAME: '@hustleops-n8n/n8n-nodes-hustleops'
+      GITHUB_PACKAGES_SCOPE: '@hustleops-n8n'
+      NPM_CONFIG_PROVENANCE: 'true'
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+          token: ${{ secrets.RELEASE_BYPASS_TOKEN || github.token }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.14.0'
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org/'
+
+      - name: Install npm version for trusted publishing
+        run: npm install -g npm@11.5.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate checked-out main
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+
+      - name: Release preflight
+        id: preflight
+        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG"
+
+      - name: Check npm version availability
+        id: npm_version
+        env:
+          RELEASE_ALREADY_PREPARED: ${{ steps.preflight.outputs.release_already_prepared }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="${RELEASE_TAG#v}"
+          set +e
+          npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version --registry=https://registry.npmjs.org/ >/tmp/npm-version.txt 2>/tmp/npm-version.err
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            if [ "$RELEASE_ALREADY_PREPARED" = "true" ]; then
+              echo "$PACKAGE_NAME@$PACKAGE_VERSION already exists on npm; treating as release recovery."
+              exit 0
+            fi
+            echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION already exists on npm"
+            cat /tmp/npm-version.txt
+            exit 1
+          fi
+          if ! grep -Eq 'E404|404 Not Found' /tmp/npm-version.err; then
+            cat /tmp/npm-version.err
+            exit "$STATUS"
+          fi
+          echo "published=false" >> "$GITHUB_OUTPUT"
+
+      - name: Verify GitHub Packages namespace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_PACKAGES_SCOPE#@}"
+          gh api "users/$OWNER" >/tmp/github-packages-owner.json
+
+      - name: Check GitHub Packages version availability
+        id: github_packages_version
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          RELEASE_ALREADY_PREPARED: ${{ steps.preflight.outputs.release_already_prepared }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="${RELEASE_TAG#v}"
+          trap 'rm -f .npmrc' EXIT
+          printf '%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' "$GITHUB_PACKAGES_SCOPE" > .npmrc
+          set +e
+          npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version --registry=https://npm.pkg.github.com >/tmp/gh-version.txt 2>/tmp/gh-version.err
+          STATUS=$?
+          set -e
+          if [ "$STATUS" -eq 0 ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            if [ "$RELEASE_ALREADY_PREPARED" = "true" ]; then
+              echo "$PACKAGE_NAME@$PACKAGE_VERSION already exists on GitHub Packages; treating as release recovery."
+              exit 0
+            fi
+            echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION already exists on GitHub Packages"
+            cat /tmp/gh-version.txt
+            exit 1
+          fi
+          if ! grep -Eq 'E404|404 Not Found' /tmp/gh-version.err; then
+            cat /tmp/gh-version.err
+            exit "$STATUS"
+          fi
+          echo "published=false" >> "$GITHUB_OUTPUT"
+
+      - name: Run pre-release quality gate
+        run: |
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm pack --dry-run
+
+      - name: Prepare release files
+        if: steps.preflight.outputs.release_already_prepared != 'true'
+        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --write
+
+      - name: Format release files
+        if: steps.preflight.outputs.release_already_prepared != 'true'
+        run: npx --no-install prettier --write package.json package-lock.json CHANGELOG.md
+
+      - name: Run post-release-file quality gate
+        if: steps.preflight.outputs.release_already_prepared != 'true'
+        run: |
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm pack --dry-run
+
+      - name: Verify GitHub Packages publish dry run
+        if: steps.github_packages_version.outputs.published != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: 'true'
+        run: |
+          set -euo pipefail
+          trap 'rm -f .npmrc' EXIT
+          printf '%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' "$GITHUB_PACKAGES_SCOPE" > .npmrc
+          npm publish --dry-run --registry=https://npm.pkg.github.com
+
+      - name: Commit release files
+        if: steps.preflight.outputs.release_already_prepared != 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "hustleops-release-bot"
+          git config user.email "hustleops-release-bot@users.noreply.github.com"
+          git add package.json package-lock.json CHANGELOG.md
+          git commit -m "chore(release): $RELEASE_TAG"
+          git push origin HEAD:main
+
+      - name: Create and push release tag
+        run: |
+          set -euo pipefail
+          git fetch origin --tags
+          if git rev-parse --verify "$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          else
+            git tag "$RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
+
+      - name: Write release notes file
+        run: |
+          set -euo pipefail
+          awk "/^## ${RELEASE_TAG} - /{flag=1; print; next} /^## / && flag{exit} flag{print}" CHANGELOG.md > /tmp/release-notes.md
+          test -s /tmp/release-notes.md
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; reusing it for recovery."
+          else
+            gh release create "$RELEASE_TAG" --draft --title "$RELEASE_TAG" --notes-file /tmp/release-notes.md --target "$(git rev-parse HEAD)"
+          fi
+
+      - name: Publish to npm
+        if: steps.npm_version.outputs.published != 'true'
+        env:
+          RELEASE_MODE: 'true'
+        run: npm publish --registry=https://registry.npmjs.org/ --provenance
+
+      - name: Publish to GitHub Packages
+        if: steps.github_packages_version.outputs.published != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+          RELEASE_MODE: 'true'
+        run: |
+          set -euo pipefail
+          trap 'rm -f .npmrc' EXIT
+          printf '%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' "$GITHUB_PACKAGES_SCOPE" > .npmrc
+          npm publish --registry=https://npm.pkg.github.com
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
