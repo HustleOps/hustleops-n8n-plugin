@@ -326,7 +326,7 @@ npm run dev
 
 ## npm Release
 
-This package is prepared for public npm release as `@hustleops/n8n-nodes-hustleops`.
+This package is prepared for public npm release as `@hustleops-n8n/n8n-nodes-hustleops`.
 
 For local self-hosted n8n testing before publication, use:
 
@@ -337,13 +337,13 @@ npm run dev
 After publication, install the package in a self-hosted n8n instance with:
 
 ```bash
-npm install @hustleops/n8n-nodes-hustleops
+npm install @hustleops-n8n/n8n-nodes-hustleops
 ```
 
 Or install it from n8n's Community Nodes UI by entering this package name:
 
 ```text
-@hustleops/n8n-nodes-hustleops
+@hustleops-n8n/n8n-nodes-hustleops
 ```
 
 Releases are created from a clean `main` branch:
