@@ -643,6 +643,14 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /contents:\s*write/);
 	assert.match(releaseWorkflow, /id-token:\s*write/);
 	assert.match(releaseWorkflow, /packages:\s*write/);
+	assert.doesNotMatch(prCheckWorkflow, /uses:\s*actions\/checkout@v4/);
+	assert.doesNotMatch(prCheckWorkflow, /uses:\s*actions\/setup-node@v4/);
+	assert.doesNotMatch(releaseWorkflow, /uses:\s*actions\/checkout@v4/);
+	assert.doesNotMatch(releaseWorkflow, /uses:\s*actions\/setup-node@v4/);
+	assert.match(prCheckWorkflow, /uses:\s*actions\/checkout@v5/);
+	assert.match(prCheckWorkflow, /uses:\s*actions\/setup-node@v5/);
+	assert.match(releaseWorkflow, /uses:\s*actions\/checkout@v5/);
+	assert.match(releaseWorkflow, /uses:\s*actions\/setup-node@v5/);
 	assert.match(releaseWorkflow, /cancel-in-progress:\s*false/);
 	assert.match(releaseWorkflow, /name:\s*Require release workflow from main/);
 	assert.match(releaseWorkflow, /\$GITHUB_REF" != "refs\/heads\/main"/);
