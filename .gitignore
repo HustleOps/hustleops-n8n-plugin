@@ -3,6 +3,7 @@ node_modules/
 docs/
 .codex/
 .claude/
+.codegraph/
 *.tsbuildinfo
 *.tgz
 .DS_Store
