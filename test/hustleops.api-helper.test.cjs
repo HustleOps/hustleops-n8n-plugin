@@ -917,3 +917,44 @@ test('credential test can use legacy request helper when httpRequest is unavaila
 
 	assert.deepEqual(calls, ['https://hustleops.example.com/api/v1/tags']);
 });
+
+test('buildGenericSearchRequest validates non-core search definitions', () => {
+	const { buildGenericSearchRequest } = require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const definition = {
+		displayName: 'Tag',
+		defaultSortBy: 'value',
+		defaultSortOrder: 'asc',
+		searchFields: ['value', 'color', 'createdAt', 'updatedAt'],
+		sortFields: ['value', 'createdAt', 'updatedAt'],
+	};
+
+	assert.deepEqual(buildGenericSearchRequest(definition, {}), {
+		pagination: {
+			page: 1,
+			pageSize: 25,
+			sortBy: 'value',
+			sortOrder: 'asc',
+		},
+	});
+
+	assert.throws(
+		() => buildGenericSearchRequest(definition, { pagination: { sortBy: 'name' } }),
+		/Unsupported Tag search sort field: name/,
+	);
+
+	assert.throws(
+		() =>
+			buildGenericSearchRequest(definition, {
+				filter: {
+					operator: 'AND',
+					groups: [
+						{
+							operator: 'AND',
+							conditions: [{ field: 'name', operator: 'eq', value: 'vip' }],
+						},
+					],
+				},
+			}),
+		/Unsupported Tag search field: name/,
+	);
+});
