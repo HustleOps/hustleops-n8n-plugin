@@ -63,7 +63,7 @@ jobs:
 
       - name: Release preflight
         id: preflight
-        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG"
+        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --require-prepared
 
       - name: Check npm version availability
         id: npm_version
@@ -99,33 +99,6 @@ jobs:
           npm run typecheck
           npm test
           npm pack --dry-run
-
-      - name: Prepare release files
-        if: steps.preflight.outputs.release_already_prepared != 'true'
-        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --write
-
-      - name: Format release files
-        if: steps.preflight.outputs.release_already_prepared != 'true'
-        run: npx --no-install prettier --write package.json package-lock.json CHANGELOG.md
-
-      - name: Run post-release-file quality gate
-        if: steps.preflight.outputs.release_already_prepared != 'true'
-        run: |
-          npm run format:check
-          npm run lint
-          npm run typecheck
-          npm test
-          npm pack --dry-run
-
-      - name: Commit release files
-        if: steps.preflight.outputs.release_already_prepared != 'true'
-        run: |
-          set -euo pipefail
-          git config user.name "hustleops-release-bot"
-          git config user.email "hustleops-release-bot@users.noreply.github.com"
-          git add package.json package-lock.json CHANGELOG.md
-          git commit -m "chore(release): $RELEASE_TAG"
-          git push origin HEAD:main
 
       - name: Create and push release tag
         run: |

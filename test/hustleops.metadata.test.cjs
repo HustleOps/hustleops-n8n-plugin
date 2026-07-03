@@ -763,13 +763,17 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /name:\s*Require release workflow from main/);
 	assert.match(releaseWorkflow, /\$GITHUB_REF" != "refs\/heads\/main"/);
 	assert.match(releaseWorkflow, /Release workflow must be run from main/);
-	assert.match(releaseWorkflow, /release-prepare\.cjs --release-tag/);
-	assert.match(releaseWorkflow, /release_already_prepared/);
 	assert.match(
 		releaseWorkflow,
-		/if:\s*steps\.preflight\.outputs\.release_already_prepared != 'true'/,
+		/release-prepare\.cjs --release-tag "\$RELEASE_TAG" --require-prepared/,
 	);
-	assert.match(releaseWorkflow, /chore\(release\): \$RELEASE_TAG/);
+	assert.match(releaseWorkflow, /release_already_prepared/);
+	assert.doesNotMatch(
+		releaseWorkflow,
+		/release-prepare\.cjs --release-tag "\$RELEASE_TAG" --write/,
+	);
+	assert.doesNotMatch(releaseWorkflow, /git push origin HEAD:main/);
+	assert.doesNotMatch(releaseWorkflow, /chore\(release\): \$RELEASE_TAG/);
 	assert.match(releaseWorkflow, /gh release create "\$RELEASE_TAG" --draft/);
 	assert.match(
 		releaseWorkflow,
