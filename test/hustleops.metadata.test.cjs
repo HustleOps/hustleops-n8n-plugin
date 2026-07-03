@@ -893,7 +893,8 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /v0\.1\.2/i);
 	assert.match(readme, /Conventional Commits/i);
 	assert.match(readme, /Trusted Publishing/i);
-	assert.match(readme, /GitHub Packages/i);
+	assert.match(readme, /publishes to npm with provenance/i);
+	assert.doesNotMatch(readme, /GitHub Packages/i);
 	assert.doesNotMatch(readme, /npm run release/i);
 	assert.match(readme, /Creator Portal/i);
 	assert.doesNotMatch(readme, /metadata-first/i);
