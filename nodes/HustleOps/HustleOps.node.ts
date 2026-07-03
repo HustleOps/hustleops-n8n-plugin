@@ -1641,12 +1641,12 @@ export class HustleOps implements INodeType {
 				default: '',
 				options: [
 					{
-						name: 'Default',
-						value: '',
-					},
-					{
 						name: 'Ascending',
 						value: 'asc',
+					},
+					{
+						name: 'Default',
+						value: '',
 					},
 					{
 						name: 'Descending',
@@ -1759,13 +1759,12 @@ export class HustleOps implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				description: 'Tag value',
 				displayOptions: modeDisplayOptions(['tag'], ['create'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
 			},
 			{
 				displayName: 'Tag Color',
 				name: 'payloadTagColor',
-				type: 'string',
+				type: 'color',
 				default: '',
 				description: 'Optional tag color',
 				displayOptions: modeDisplayOptions(

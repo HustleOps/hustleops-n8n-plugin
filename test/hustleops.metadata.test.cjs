@@ -576,7 +576,7 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 	]);
 	assert.equal(tagValue.type, 'string');
 	assert.deepEqual(tagValue.displayOptions.show.operation, ['create']);
-	assert.equal(tagColor.type, 'string');
+	assert.equal(tagColor.type, 'color');
 	assert.deepEqual(tagColor.displayOptions.show.operation, [
 		'create',
 		'updateColor',
