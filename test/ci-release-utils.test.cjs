@@ -226,6 +226,36 @@ test('generateChangelog creates a release entry from conventional commits', () =
 	assert.doesNotMatch(changelog, /chore\(release\): v0.1.2/);
 });
 
+test('release prepare write updates package files and changelog', () => {
+	const directory = createGitPackageFixture('0.1.1', {
+		changelog: '# Changelog\n\n## v0.1.1 - 2026-07-01\n\n- Existing release.\n',
+		subject: 'feat(alerts): add severity mapping',
+	});
+	childProcess.execFileSync('git', ['tag', 'v0.1.1'], { cwd: directory, stdio: 'ignore' });
+	fs.writeFileSync(path.join(directory, 'README.md'), '# Fixture\n');
+	childProcess.execFileSync('git', ['add', 'README.md'], { cwd: directory, stdio: 'ignore' });
+	childProcess.execFileSync('git', ['commit', '-m', 'docs: update release notes'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+
+	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--write']);
+	const packageJson = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+	const packageLock = JSON.parse(
+		fs.readFileSync(path.join(directory, 'package-lock.json'), 'utf8'),
+	);
+	const changelog = fs.readFileSync(path.join(directory, 'CHANGELOG.md'), 'utf8');
+
+	assert.match(output, /Prepared release files for v0\.1\.2/);
+	assert.equal(packageJson.version, '0.1.2');
+	assert.equal(packageLock.version, '0.1.2');
+	assert.equal(packageLock.packages[''].version, '0.1.2');
+	assert.match(changelog, /^# Changelog\n\n## v0\.1\.2 - \d{4}-\d{2}-\d{2}/);
+	assert.match(changelog, /### Documentation/);
+	assert.match(changelog, /- update release notes/);
+	assert.match(changelog, /## v0\.1\.1 - 2026-07-01/);
+});
+
 test('release prepare require-prepared rejects unprepared release files', () => {
 	const directory = createGitPackageFixture('0.1.1');
 

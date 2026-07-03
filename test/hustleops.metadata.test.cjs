@@ -763,17 +763,38 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /name:\s*Require release workflow from main/);
 	assert.match(releaseWorkflow, /\$GITHUB_REF" != "refs\/heads\/main"/);
 	assert.match(releaseWorkflow, /Release workflow must be run from main/);
+	const preflightIndex = releaseWorkflow.indexOf('name: Release preflight');
+	const prepareIndex = releaseWorkflow.indexOf('name: Prepare release files');
+	const verifyIndex = releaseWorkflow.indexOf('name: Verify prepared release state');
+	const tagIndex = releaseWorkflow.indexOf('name: Create and push release tag');
+
+	assert.notEqual(preflightIndex, -1);
+	assert.notEqual(prepareIndex, -1);
+	assert.notEqual(verifyIndex, -1);
+	assert.notEqual(tagIndex, -1);
+	assert.ok(preflightIndex < prepareIndex);
+	assert.ok(prepareIndex < verifyIndex);
+	assert.ok(verifyIndex < tagIndex);
 	assert.match(
-		releaseWorkflow,
+		releaseWorkflow.slice(preflightIndex, prepareIndex),
+		/release-prepare\.cjs --release-tag "\$RELEASE_TAG"\n/,
+	);
+	assert.doesNotMatch(releaseWorkflow.slice(preflightIndex, prepareIndex), /--require-prepared/);
+	assert.match(releaseWorkflow, /release-prepare\.cjs --release-tag "\$RELEASE_TAG" --write/);
+	assert.match(releaseWorkflow, /release_already_prepared/);
+	assert.match(releaseWorkflow, /git diff --name-only/);
+	assert.match(releaseWorkflow, /CHANGELOG\.md\|package\.json\|package-lock\.json/);
+	assert.match(releaseWorkflow, /git config user\.name "github-actions\[bot\]"/);
+	assert.match(releaseWorkflow, /git commit -m "chore\(release\): \$RELEASE_TAG"/);
+	assert.match(releaseWorkflow, /git push origin HEAD:main/);
+	assert.match(
+		releaseWorkflow.slice(verifyIndex, tagIndex),
 		/release-prepare\.cjs --release-tag "\$RELEASE_TAG" --require-prepared/,
 	);
-	assert.match(releaseWorkflow, /release_already_prepared/);
-	assert.doesNotMatch(
+	assert.match(
 		releaseWorkflow,
-		/release-prepare\.cjs --release-tag "\$RELEASE_TAG" --write/,
+		/git fetch origin \+refs\/heads\/main:refs\/remotes\/origin\/main --tags/,
 	);
-	assert.doesNotMatch(releaseWorkflow, /git push origin HEAD:main/);
-	assert.doesNotMatch(releaseWorkflow, /chore\(release\): \$RELEASE_TAG/);
 	assert.match(releaseWorkflow, /gh release create "\$RELEASE_TAG" --draft/);
 	assert.match(
 		releaseWorkflow,
