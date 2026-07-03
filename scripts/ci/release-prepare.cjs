@@ -14,6 +14,17 @@ const {
 	updatePackageVersion,
 } = require('./release-utils.cjs');
 
+const PACKAGE_IMPACTING_PATHS = [
+	'CHANGELOG.md',
+	'LICENSE',
+	'README.md',
+	'credentials',
+	'dist',
+	'nodes',
+	'package-lock.json',
+	'package.json',
+];
+
 function readArg(name) {
 	const index = process.argv.indexOf(name);
 	return index === -1 ? null : process.argv[index + 1];
@@ -66,14 +77,51 @@ function tagPointsToHead(tag) {
 	return tagSha === runGit(['rev-parse', 'HEAD']);
 }
 
+function findPreparedReleaseCommit(releaseTag) {
+	const releaseSubject = `chore(release): ${releaseTag}`;
+	const commits = runGit(['log', '--format=%H%x00%s']);
+
+	for (const commit of commits.split(/\r?\n/)) {
+		const separatorIndex = commit.indexOf('\0');
+		if (separatorIndex === -1) {
+			continue;
+		}
+
+		const sha = commit.slice(0, separatorIndex);
+		const subject = commit.slice(separatorIndex + 1);
+		if (subject === releaseSubject) {
+			return sha;
+		}
+	}
+
+	return null;
+}
+
+function getPackageImpactingChangesSince(commit) {
+	const output = tryRunGit([
+		'diff',
+		'--name-only',
+		`${commit}..HEAD`,
+		'--',
+		...PACKAGE_IMPACTING_PATHS,
+	]);
+	return output ? output.split(/\r?\n/).filter(Boolean) : [];
+}
+
 function assertPreparedReleaseState(rootDirectory, releaseTag) {
 	const changelogPath = path.join(rootDirectory, 'CHANGELOG.md');
 	const changelog = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
-	const headSubject = runGit(['log', '-1', '--format=%s']);
+	const releaseCommit = findPreparedReleaseCommit(releaseTag);
 
-	if (headSubject !== `chore(release): ${releaseTag}`) {
+	if (!releaseCommit) {
 		throw new Error(
 			`current version already matches ${releaseTag}, but HEAD is not the release commit`,
+		);
+	}
+	const packageChanges = getPackageImpactingChangesSince(releaseCommit);
+	if (packageChanges.length > 0) {
+		throw new Error(
+			`current version already matches ${releaseTag}, but package-impacting files changed after the release commit:\n- ${packageChanges.join('\n- ')}`,
 		);
 	}
 	if (
@@ -88,6 +136,8 @@ function assertPreparedReleaseState(rootDirectory, releaseTag) {
 function main() {
 	const releaseTag = readArg('--release-tag') ?? process.env.RELEASE_TAG;
 	const write = hasFlag('--write');
+	const requirePrepared =
+		hasFlag('--require-prepared') || process.env.RELEASE_REQUIRE_PREPARED === 'true';
 	const rootDirectory = process.cwd();
 	const requested = parseReleaseTag(releaseTag);
 	const currentVersion = assertPackageVersionsAgree(rootDirectory);
@@ -96,6 +146,11 @@ function main() {
 	if (compareSemver(requested.version, currentVersion) < 0) {
 		throw new Error(
 			`requested version ${requested.version} must be greater than current version ${currentVersion}`,
+		);
+	}
+	if (requirePrepared && !preparedRelease) {
+		throw new Error(
+			`release files must be prepared through a pull request before publishing ${releaseTag}`,
 		);
 	}
 
