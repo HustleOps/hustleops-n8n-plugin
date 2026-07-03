@@ -711,6 +711,7 @@ test('runtime package surface stays compatible with verified community node cons
 
 test('README documents live HustleOps API core operations', () => {
 	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+	const readmeLines = readme.split(/\r?\n/);
 
 	assert.match(readme, /live HustleOps API/i);
 	assert.match(readme, /x-api-key/i);
@@ -757,10 +758,6 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Custom Field/i);
 	assert.match(readme, /Replace Values/i);
 	assert.match(readme, /Update Selected Values Safely/i);
-	assert.match(readme, /COMMENTS:VIEW/i);
-	assert.match(readme, /COMMENTS:CREATE/i);
-	assert.match(readme, /COMMENTS:UPDATE/i);
-	assert.match(readme, /COMMENTS:DELETE/i);
 	assert.match(readme, /Entity Type/i);
 	assert.match(readme, /Entity ID/i);
 	assert.match(readme, /Comment ID/i);
@@ -769,16 +766,18 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Include Cursor Metadata/i);
 	assert.match(readme, /one item per comment/i);
 	assert.match(readme, /\{ "unreadCount": number \}/i);
-	assert.match(readme, /Attachment upload and download are not included/i);
-	assert.match(readme, /npm install @hustleops-n8n\/n8n-nodes-hustleops/i);
-	assert.match(readme, /Community Nodes/i);
-	assert.match(readme, /Release workflow/i);
-	assert.match(readme, /v0\.1\.2/i);
-	assert.match(readme, /Conventional Commits/i);
-	assert.match(readme, /Trusted Publishing/i);
-	assert.match(readme, /GitHub Packages/i);
+	assert.equal(
+		readmeLines.slice(271).every((line) => line === ''),
+		true,
+	);
+	assert.doesNotMatch(readme, /Comment Permissions/i);
+	assert.doesNotMatch(readme, /COMMENTS:VIEW/i);
+	assert.doesNotMatch(readme, /Attachment upload and download are not included/i);
+	assert.doesNotMatch(readme, /npm install @hustleops-n8n\/n8n-nodes-hustleops/i);
+	assert.doesNotMatch(readme, /Community Nodes/i);
+	assert.doesNotMatch(readme, /Release workflow/i);
 	assert.doesNotMatch(readme, /npm run release/i);
-	assert.match(readme, /Creator Portal/i);
+	assert.doesNotMatch(readme, /Creator Portal/i);
 	assert.doesNotMatch(readme, /metadata-first/i);
 	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
 });
