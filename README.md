@@ -363,13 +363,13 @@ docs: update release runbook
 chore(release): v0.1.2
 ```
 
-Releases are created from GitHub Actions with the manual `Release` workflow. Run the workflow from `main` with a stable tag input such as:
+Prepare release files in a pull request first by updating `package.json`, `package-lock.json`, and `CHANGELOG.md` with a `chore(release): vX.Y.Z` commit. After that release PR is merged, create the release from GitHub Actions with the manual `Release` workflow. Run the workflow from `main` with a stable tag input such as:
 
 ```text
 v0.1.2
 ```
 
-The workflow derives package version `0.1.2`, validates the previous tag, updates `package.json`, `package-lock.json`, and `CHANGELOG.md`, creates `chore(release): v0.1.2`, tags that commit, creates a draft GitHub Release, publishes to npm with provenance, publishes to GitHub Packages, then publishes the GitHub Release.
+The workflow validates that the package files are already prepared for version `0.1.2`, checks npm version availability, runs the release quality gate, tags the current `main` commit, creates a draft GitHub Release, publishes to npm with provenance, then publishes the GitHub Release.
 
 Existing repository tags `0.1.0` and `0.1.1` use the old bare semver style. New workflow-created tags use the `vX.Y.Z` style, and the release workflow treats both styles as valid previous-release boundaries.
 
@@ -378,7 +378,6 @@ Before the first workflow release, configure:
 - npm Trusted Publishing for `HustleOps/hustleops-n8n-plugin` and `.github/workflows/release.yml`.
 - GitHub branch protection or a ruleset for `main`.
 - The release bypass actor or `RELEASE_BYPASS_TOKEN`, if `GITHUB_TOKEN` cannot bypass protection.
-- GitHub Packages ownership for the `@hustleops-n8n` scope.
 
 After publication, install the package in a self-hosted n8n instance with:
 
