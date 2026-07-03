@@ -36,8 +36,6 @@ async function execute(parametersByItem, httpResponseFactory) {
 }
 
 const {
-	ADDITIONAL_JSON_PARAMETER,
-	LEGACY_BODY_PARAMETER,
 	createAdditionalFieldsParameterName: createAdditionalFieldsName,
 	structuredFieldParameterName: structuredFieldName,
 	updateFieldsParameterName: updateFieldsName,
@@ -72,7 +70,6 @@ test('create builds structured body and posts to the resource endpoint', async (
 					status: '',
 					tags: '["okta"]',
 				},
-				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: 'incident-id-1', displayId: 'INC-1' }),
@@ -104,7 +101,6 @@ test('update builds structured body and patches the resource detail endpoint', a
 					criticality: 'HIGH',
 					version: 4,
 				},
-				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: observableId, threatLevel: 'MALICIOUS' }),
@@ -185,19 +181,18 @@ test('additional JSON merges after structured create fields and overrides duplic
 			{
 				resource: 'alert',
 				operation: 'create',
-				[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
-				[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
-				[structuredFieldName('alert', 'create', 'severity')]: 'LOW',
-				[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
-				[structuredFieldName('alert', 'create', 'source')]: 'okta',
-				[structuredFieldName('alert', 'create', 'type')]: 'authentication',
-				[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
-				[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
-				[createAdditionalFieldsName('alert')]: {},
-				[ADDITIONAL_JSON_PARAMETER]: JSON.stringify({
+				payloadInputMode: 'jsonObject',
+				payloadAlertCreateJsonObject: JSON.stringify({
+					name: 'Suspicious login',
+					description: 'Okta anomaly',
 					severity: 'HIGH',
-					alertRefUrl: 'https://okta.example.com/events/evt_12345',
+					tlp: 'AMBER',
+					source: 'okta',
+					type: 'authentication',
+					sourceRef: 'evt_12345',
+					detectedAt: '2026-06-28T12:00:00.000Z',
 				}),
+				[structuredFieldName('alert', 'create', 'name')]: 'Ignored hidden value',
 			},
 		],
 		() => ({ id: 'alert-id-1', displayId: 'ALT-1' }),
@@ -212,8 +207,31 @@ test('additional JSON merges after structured create fields and overrides duplic
 		type: 'authentication',
 		sourceRef: 'evt_12345',
 		detectedAt: '2026-06-28T12:00:00.000Z',
-		alertRefUrl: 'https://okta.example.com/events/evt_12345',
 	});
+});
+
+test('core create individual fields mode ignores JSON object payload', async () => {
+	const { calls } = await execute(
+		[
+			{
+				resource: 'incident',
+				operation: 'create',
+				payloadInputMode: 'individualFields',
+				payloadIncidentCreateJsonObject: '{"name":"Ignored JSON"}',
+				[structuredFieldName('incident', 'create', 'name')]: 'Credential theft',
+				[structuredFieldName('incident', 'create', 'description')]: 'Okta alerts',
+				[structuredFieldName('incident', 'create', 'severity')]: 'HIGH',
+				[structuredFieldName('incident', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('incident', 'create', 'category')]: 'identity',
+			},
+		],
+		() => ({ id: 'incident-id-1' }),
+	);
+
+	assert.equal(calls[0].body.name, 'Credential theft');
+	assert.equal(calls[0].body.description, 'Okta alerts');
+	assert.equal(calls[0].body.category, 'identity');
+	assert.equal(calls[0].body.name === 'Ignored JSON', false);
 });
 
 test('empty optional structured create fields are omitted', async () => {
@@ -232,7 +250,6 @@ test('empty optional structured create fields are omitted', async () => {
 					assigneeId: '',
 					tags: '[]',
 				},
-				[ADDITIONAL_JSON_PARAMETER]: '',
 			},
 		],
 		() => ({ id: 'incident-id-1', displayId: 'INC-1' }),
@@ -245,103 +262,6 @@ test('empty optional structured create fields are omitted', async () => {
 		tlp: 'AMBER',
 		category: 'identity',
 	});
-});
-
-test('additional JSON can clear update fields with null values', async () => {
-	const incidentId = '11111111-1111-4111-8111-111111111111';
-	const { calls } = await execute(
-		[
-			{
-				resource: 'incident',
-				operation: 'update',
-				id: incidentId,
-				[updateFieldsName('incident')]: {},
-				[ADDITIONAL_JSON_PARAMETER]: '{"summary":null}',
-			},
-		],
-		() => ({ id: incidentId, summary: null }),
-	);
-
-	assert.equal(calls[0].method, 'PATCH');
-	assert.equal(calls[0].url, `https://hustleops.example.com/api/v1/incidents/${incidentId}`);
-	assert.deepEqual(calls[0].body, { summary: null });
-});
-
-test('legacy body is honored when structured write inputs are empty', async () => {
-	const { calls } = await execute(
-		[
-			{
-				resource: 'incident',
-				operation: 'create',
-				[LEGACY_BODY_PARAMETER]: JSON.stringify({
-					name: 'Credential theft',
-					description: 'Okta alerts',
-					severity: 'HIGH',
-					tlp: 'AMBER',
-					category: 'identity',
-					tags: ['okta'],
-				}),
-			},
-		],
-		() => ({ id: 'incident-id-1', displayId: 'INC-1' }),
-	);
-
-	assert.deepEqual(calls[0].body, {
-		name: 'Credential theft',
-		description: 'Okta alerts',
-		severity: 'HIGH',
-		tlp: 'AMBER',
-		category: 'identity',
-		tags: ['okta'],
-	});
-});
-
-test('additional JSON supported-field overrides are still sanitized before API requests', async () => {
-	const validAlertCreate = {
-		resource: 'alert',
-		operation: 'create',
-		[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
-		[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
-		[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
-		[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
-		[structuredFieldName('alert', 'create', 'source')]: 'okta',
-		[structuredFieldName('alert', 'create', 'type')]: 'authentication',
-		[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
-		[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
-		[createAdditionalFieldsName('alert')]: {},
-	};
-
-	const invalidSeverity = createContext(
-		[
-			{
-				...validAlertCreate,
-				[ADDITIONAL_JSON_PARAMETER]: '{"severity":"ADMIN"}',
-			},
-		],
-		() => ({ id: 'should-not-run' }),
-	);
-	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
-	const node = new HustleOps();
-	await assert.rejects(
-		node.execute.call(invalidSeverity.context),
-		/Alert field severity must be one of/,
-	);
-	assert.equal(invalidSeverity.calls.length, 0);
-
-	const invalidUuid = createContext(
-		[
-			{
-				...validAlertCreate,
-				[ADDITIONAL_JSON_PARAMETER]: '{"incidentId":"../users"}',
-			},
-		],
-		() => ({ id: 'should-not-run' }),
-	);
-	await assert.rejects(
-		node.execute.call(invalidUuid.context),
-		/Alert field incidentId must be a UUID/,
-	);
-	assert.equal(invalidUuid.calls.length, 0);
 });
 
 test('structured tags use entity tag validation before API requests', async () => {
@@ -358,7 +278,6 @@ test('structured tags use entity tag validation before API requests', async () =
 				[createAdditionalFieldsName('incident')]: {
 					tags: '["okta",7]',
 				},
-				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -370,49 +289,42 @@ test('structured tags use entity tag validation before API requests', async () =
 	assert.equal(calls.length, 0);
 });
 
-test('additional JSON tag overrides use entity tag validation before API requests', async () => {
-	const validIncidentCreate = {
-		resource: 'incident',
-		operation: 'create',
-		[structuredFieldName('incident', 'create', 'name')]: 'Credential theft',
-		[structuredFieldName('incident', 'create', 'description')]: 'Okta alerts',
-		[structuredFieldName('incident', 'create', 'severity')]: 'HIGH',
-		[structuredFieldName('incident', 'create', 'tlp')]: 'AMBER',
-		[structuredFieldName('incident', 'create', 'category')]: 'identity',
-		[createAdditionalFieldsName('incident')]: {
-			tags: '["okta"]',
-		},
+test('core JSON object mode validates tags before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'incident',
+				operation: 'create',
+				payloadInputMode: 'jsonObject',
+				payloadIncidentCreateJsonObject: JSON.stringify({
+					name: 'Credential theft',
+					description: 'Okta alerts',
+					severity: 'HIGH',
+					tlp: 'AMBER',
+					category: 'identity',
+					tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`),
+				}),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
 	};
+
 	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
 	const node = new HustleOps();
-
-	const invalidTagValue = createContext(
-		[
-			{
-				...validIncidentCreate,
-				[ADDITIONAL_JSON_PARAMETER]: '{"tags":["okta",7]}',
-			},
-		],
-		() => ({ id: 'should-not-run' }),
-	);
-	await assert.rejects(node.execute.call(invalidTagValue.context), /Tag value must be a string/);
-	assert.equal(invalidTagValue.calls.length, 0);
-
-	const oversizedTags = Array.from({ length: 21 }, (_value, index) => `tag-${index}`);
-	const oversizedTagList = createContext(
-		[
-			{
-				...validIncidentCreate,
-				[ADDITIONAL_JSON_PARAMETER]: JSON.stringify({ tags: oversizedTags }),
-			},
-		],
-		() => ({ id: 'should-not-run' }),
-	);
 	await assert.rejects(
-		node.execute.call(oversizedTagList.context),
+		node.execute.call(context),
 		/Entity tags cannot contain more than 20 values/,
 	);
-	assert.equal(oversizedTagList.calls.length, 0);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
 });
 
 test('structured alert create validates source before API requests', async () => {
@@ -430,7 +342,6 @@ test('structured alert create validates source before API requests', async () =>
 				[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
 				[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
 				[createAdditionalFieldsName('alert')]: {},
-				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -452,16 +363,8 @@ test('core write validation rejects invalid payloads before credentials are read
 			{
 				resource: 'alert',
 				operation: 'create',
-				[structuredFieldName('alert', 'create', 'name')]: 'x',
-				[structuredFieldName('alert', 'create', 'description')]: '',
-				[structuredFieldName('alert', 'create', 'severity')]: '',
-				[structuredFieldName('alert', 'create', 'tlp')]: '',
-				[structuredFieldName('alert', 'create', 'source')]: '',
-				[structuredFieldName('alert', 'create', 'type')]: '',
-				[structuredFieldName('alert', 'create', 'sourceRef')]: '',
-				[structuredFieldName('alert', 'create', 'detectedAt')]: '',
-				[createAdditionalFieldsName('alert')]: {},
-				[ADDITIONAL_JSON_PARAMETER]: '{"createdById":"user-id"}',
+				payloadInputMode: 'jsonObject',
+				payloadAlertCreateJsonObject: '{"createdById":"user-id"}',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -494,7 +397,6 @@ test('structured field validation errors reference display labels', async () => 
 		[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
 		[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
 		[createAdditionalFieldsName('alert')]: {},
-		[ADDITIONAL_JSON_PARAMETER]: '{}',
 	};
 	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
 	const node = new HustleOps();
@@ -536,7 +438,8 @@ test('search posts a search request and returns one item per response row', asyn
 			{
 				resource: 'knowledge',
 				operation: 'search',
-				searchBody: JSON.stringify({
+				payloadInputMode: 'jsonObject',
+				payloadKnowledgeSearchJsonObject: JSON.stringify({
 					filter: {
 						operator: 'AND',
 						groups: [
@@ -568,13 +471,47 @@ test('search posts a search request and returns one item per response row', asyn
 	);
 });
 
+test('core search individual fields mode builds a validated search request', async () => {
+	const { calls } = await execute(
+		[
+			{
+				resource: 'alert',
+				operation: 'search',
+				payloadInputMode: 'individualFields',
+				payloadSearchFilter: JSON.stringify({
+					operator: 'AND',
+					groups: [
+						{
+							operator: 'AND',
+							conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }],
+						},
+					],
+				}),
+				payloadSearchPage: 2,
+				payloadSearchPageSize: 10,
+				payloadSearchSortBy: '',
+				payloadSearchSortOrder: '',
+			},
+		],
+		() => ({ data: [], total: 0, page: 2, pageSize: 10, totalPages: 0 }),
+	);
+
+	assert.deepEqual(calls[0].body.pagination, {
+		page: 2,
+		pageSize: 10,
+		sortBy: 'detectedAt',
+		sortOrder: 'desc',
+	});
+});
+
 test('search returnAll uses automatic pagination', async () => {
 	const { result, calls } = await execute(
 		[
 			{
 				resource: 'alert',
 				operation: 'search',
-				searchBody:
+				payloadInputMode: 'jsonObject',
+				payloadAlertSearchJsonObject:
 					'{"pagination":{"page":1,"pageSize":1,"sortBy":"detectedAt","sortOrder":"desc"}}',
 				returnAll: true,
 				maxItems: 2,
@@ -613,7 +550,8 @@ test('search can return raw pagination metadata for one page', async () => {
 			{
 				resource: 'knowledge',
 				operation: 'search',
-				searchBody: '{"pagination":{"page":1,"pageSize":1}}',
+				payloadInputMode: 'jsonObject',
+				payloadKnowledgeSearchJsonObject: '{"pagination":{"page":1,"pageSize":1}}',
 				returnAll: false,
 				includePaginationMetadata: true,
 			},
@@ -630,7 +568,8 @@ test('search rejects invalid Return All limits before an API request is sent', a
 			{
 				resource: 'alert',
 				operation: 'search',
-				searchBody: '{}',
+				payloadInputMode: 'jsonObject',
+				payloadAlertSearchJsonObject: '{}',
 				returnAll: true,
 				maxItems: 0,
 				maxPages: 5,
@@ -652,7 +591,8 @@ test('search rejects malformed paginated API responses clearly', async () => {
 				{
 					resource: 'knowledge',
 					operation: 'search',
-					searchBody: '{}',
+					payloadInputMode: 'jsonObject',
+					payloadKnowledgeSearchJsonObject: '{}',
 				},
 			],
 			() => ({ data: {}, total: 1, page: 1, pageSize: 25, totalPages: 1 }),
@@ -663,7 +603,7 @@ test('search rejects malformed paginated API responses clearly', async () => {
 
 test('count posts to the count endpoint and returns the count body', async () => {
 	const { result, calls } = await execute(
-		[{ resource: 'incident', operation: 'count', searchBody: '{}' }],
+		[{ resource: 'incident', operation: 'count', payloadInputMode: 'individualFields' }],
 		() => ({ count: 7 }),
 	);
 
@@ -679,16 +619,8 @@ test('unsupported body fields fail before an API request is sent', async () => {
 				{
 					resource: 'alert',
 					operation: 'create',
-					[structuredFieldName('alert', 'create', 'name')]: 'x',
-					[structuredFieldName('alert', 'create', 'description')]: '',
-					[structuredFieldName('alert', 'create', 'severity')]: '',
-					[structuredFieldName('alert', 'create', 'tlp')]: '',
-					[structuredFieldName('alert', 'create', 'source')]: '',
-					[structuredFieldName('alert', 'create', 'type')]: '',
-					[structuredFieldName('alert', 'create', 'sourceRef')]: '',
-					[structuredFieldName('alert', 'create', 'detectedAt')]: '',
-					[createAdditionalFieldsName('alert')]: {},
-					[ADDITIONAL_JSON_PARAMETER]: '{"createdById":"user-id"}',
+					payloadInputMode: 'jsonObject',
+					payloadAlertCreateJsonObject: '{"createdById":"user-id"}',
 				},
 			],
 			() => ({ id: 'should-not-run' }),
@@ -824,9 +756,8 @@ test('comment create posts sanitized body', async () => {
 				operation: 'create',
 				entityType: 'OBSERVABLE',
 				entityId,
-				commentBody: JSON.stringify({
-					content: 'Observed in proxy logs',
-				}),
+				payloadInputMode: 'individualFields',
+				payloadCommentContent: 'Observed in proxy logs',
 			},
 		],
 		() => ({ id: 'comment-1', autoTransitioned: false }),
@@ -840,6 +771,45 @@ test('comment create posts sanitized body', async () => {
 		content: 'Observed in proxy logs',
 	});
 	assert.deepEqual(result[0][0].json, { id: 'comment-1', autoTransitioned: false });
+});
+
+test('comment create supports individual fields and JSON object replacement', async () => {
+	const entityId = '11111111-1111-4111-8111-111111111111';
+	const attachmentId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[
+			{
+				resource: 'comment',
+				operation: 'create',
+				entityType: 'INCIDENT',
+				entityId,
+				payloadInputMode: 'individualFields',
+				payloadCommentContent: '',
+				payloadCommentAttachmentIds: JSON.stringify([attachmentId]),
+			},
+			{
+				resource: 'comment',
+				operation: 'create',
+				entityType: 'INCIDENT',
+				entityId,
+				payloadInputMode: 'jsonObject',
+				payloadCommentCreateJsonObject: JSON.stringify({ content: 'JSON note' }),
+				payloadCommentContent: 'Ignored field note',
+			},
+		],
+		() => ({ id: 'comment-created' }),
+	);
+
+	assert.deepEqual(calls[0].body, {
+		entityType: 'INCIDENT',
+		entityId,
+		attachmentIds: [attachmentId],
+	});
+	assert.deepEqual(calls[1].body, {
+		entityType: 'INCIDENT',
+		entityId,
+		content: 'JSON note',
+	});
 });
 
 test('comment mark read posts entity body and returns success object', async () => {
@@ -870,7 +840,8 @@ test('comment update patches comment content', async () => {
 				resource: 'comment',
 				operation: 'update',
 				commentId,
-				commentBody: '{"content":"Updated containment note"}',
+				payloadInputMode: 'individualFields',
+				payloadCommentContent: 'Updated containment note',
 			},
 		],
 		() => ({ id: commentId, content: 'Updated containment note' }),
@@ -905,7 +876,8 @@ test('comment toggle reaction posts emoji body', async () => {
 				resource: 'comment',
 				operation: 'toggleReaction',
 				commentId,
-				commentBody: '{"emoji":"OK"}',
+				payloadInputMode: 'individualFields',
+				payloadCommentEmoji: 'OK',
 			},
 		],
 		() => ({ id: commentId, reactions: [{ emoji: 'OK', count: 1, users: [] }] }),
@@ -939,7 +911,7 @@ test('comment create rejects empty body before an API request is sent', async ()
 				operation: 'create',
 				entityType: 'ALERT',
 				entityId: '11111111-1111-4111-8111-111111111111',
-				commentBody: '{}',
+				payloadInputMode: 'individualFields',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -962,7 +934,8 @@ test('comment create rejects entity scope inside Comment Body', async () => {
 				operation: 'create',
 				entityType: 'ALERT',
 				entityId: '11111111-1111-4111-8111-111111111111',
-				commentBody:
+				payloadInputMode: 'jsonObject',
+				payloadCommentCreateJsonObject:
 					'{"entityType":"INCIDENT","entityId":"22222222-2222-4222-8222-222222222222","content":"wrong target"}',
 			},
 		],
@@ -998,7 +971,9 @@ test('comment operations reject unsupported body fields before credentials are r
 				resource: 'comment',
 				operation: 'update',
 				commentId: '22222222-2222-4222-8222-222222222222',
-				commentBody: '{"content":"Updated note","entityId":"11111111-1111-4111-8111-111111111111"}',
+				payloadInputMode: 'jsonObject',
+				payloadCommentUpdateJsonObject:
+					'{"content":"Updated note","entityId":"11111111-1111-4111-8111-111111111111"}',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -1027,20 +1002,45 @@ test('tag resource operations call the requested admin endpoints', async () => {
 			{
 				resource: 'tag',
 				operation: 'search',
-				tagBody: '{"filter":{"operator":"AND","groups":[]}}',
+				payloadInputMode: 'individualFields',
+				payloadSearchFilter: JSON.stringify({
+					operator: 'AND',
+					groups: [
+						{
+							operator: 'AND',
+							conditions: [{ field: 'value', operator: 'eq', value: 'vip' }],
+						},
+					],
+				}),
 			},
-			{ resource: 'tag', operation: 'create', tagBody: '{"value":"vip","color":"#0EA5E9"}' },
-			{ resource: 'tag', operation: 'updateColor', tagId, tagBody: '{"color":"#A855F7"}' },
+			{
+				resource: 'tag',
+				operation: 'create',
+				payloadInputMode: 'individualFields',
+				payloadTagValue: 'vip',
+				payloadTagColor: '#0EA5E9',
+			},
+			{
+				resource: 'tag',
+				operation: 'updateColor',
+				tagId,
+				payloadInputMode: 'individualFields',
+				payloadTagColor: '#A855F7',
+			},
 			{
 				resource: 'tag',
 				operation: 'bulkUpdateColor',
-				tagBody: JSON.stringify({ ids: [tagId, secondTagId], color: '#22C55E' }),
+				payloadInputMode: 'individualFields',
+				payloadTagIds: JSON.stringify([tagId, secondTagId]),
+				payloadTagColor: '#22C55E',
 			},
 			{ resource: 'tag', operation: 'delete', tagId, force: true },
 			{
 				resource: 'tag',
 				operation: 'bulkDelete',
-				tagBody: JSON.stringify({ ids: [tagId, secondTagId], force: true }),
+				payloadInputMode: 'individualFields',
+				payloadTagIds: JSON.stringify([tagId, secondTagId]),
+				payloadTagForce: true,
 			},
 		],
 		(options) =>
@@ -1055,7 +1055,18 @@ test('tag resource operations call the requested admin endpoints', async () => {
 
 	assert.equal(calls[1].method, 'POST');
 	assert.equal(calls[1].url, 'https://hustleops.example.com/api/v1/tags/search');
-	assert.deepEqual(calls[1].body, { filter: { operator: 'AND', groups: [] } });
+	assert.deepEqual(calls[1].body, {
+		filter: {
+			operator: 'AND',
+			groups: [
+				{
+					operator: 'AND',
+					conditions: [{ field: 'value', operator: 'eq', value: 'vip' }],
+				},
+			],
+		},
+		pagination: { page: 1, pageSize: 25, sortBy: 'value', sortOrder: 'asc' },
+	});
 
 	assert.equal(calls[2].method, 'POST');
 	assert.equal(calls[2].url, 'https://hustleops.example.com/api/v1/tags');
@@ -1085,12 +1096,19 @@ test('entity tag operations are exposed under core resources', async () => {
 	const tagId = '44444444-4444-4444-8444-444444444444';
 	const { calls } = await execute(
 		[
-			{ resource: 'alert', operation: 'setTags', id: alertId, tagValues: '[]' },
+			{
+				resource: 'alert',
+				operation: 'setTags',
+				id: alertId,
+				payloadInputMode: 'individualFields',
+				payloadEntityTagValues: '[]',
+			},
 			{
 				resource: 'incident',
 				operation: 'addTags',
 				id: incidentId,
-				tagValues: '["phishing","vip"]',
+				payloadInputMode: 'individualFields',
+				payloadEntityTagValues: '["phishing","vip"]',
 			},
 			{ resource: 'observable', operation: 'removeTag', id: observableId, tagId },
 		],
@@ -1113,6 +1131,41 @@ test('entity tag operations are exposed under core resources', async () => {
 	assert.equal(calls[2].body, undefined);
 });
 
+test('entity tag JSON object mode rejects unsupported fields before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'alert',
+				operation: 'setTags',
+				id: '11111111-1111-4111-8111-111111111111',
+				payloadInputMode: 'jsonObject',
+				payloadAlertSetTagsJsonObject: JSON.stringify({
+					values: ['vip'],
+					entityId: '22222222-2222-4222-8222-222222222222',
+				}),
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
+	};
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(
+		node.execute.call(context),
+		/Unsupported Set Tags JSON Object field: entityId/,
+	);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
+});
+
 test('entity add tags rejects empty values before an API request is sent', async () => {
 	const { context, calls } = createContext(
 		[
@@ -1120,7 +1173,8 @@ test('entity add tags rejects empty values before an API request is sent', async
 				resource: 'knowledge',
 				operation: 'addTags',
 				id: '11111111-1111-4111-8111-111111111111',
-				tagValues: '[]',
+				payloadInputMode: 'individualFields',
+				payloadEntityTagValues: '[]',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -1140,12 +1194,17 @@ test('tag and custom field boolean JSON fields reject string values', async () =
 			{
 				resource: 'tag',
 				operation: 'bulkDelete',
-				tagBody: JSON.stringify({ ids: [tagId], force: 'false' }),
+				payloadInputMode: 'jsonObject',
+				payloadTagBulkDeleteJsonObject: JSON.stringify({ ids: [tagId], force: 'false' }),
 			},
 			{
 				resource: 'customField',
 				operation: 'bulkUpdateDefinitions',
-				customFieldBody: JSON.stringify({ ids: [definitionId], isRequired: 'false' }),
+				payloadInputMode: 'jsonObject',
+				payloadCustomFieldBulkUpdateDefinitionsJsonObject: JSON.stringify({
+					ids: [definitionId],
+					isRequired: 'false',
+				}),
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -1161,7 +1220,11 @@ test('tag and custom field boolean JSON fields reject string values', async () =
 			{
 				resource: 'customField',
 				operation: 'bulkUpdateDefinitions',
-				customFieldBody: JSON.stringify({ ids: [definitionId], isRequired: 'false' }),
+				payloadInputMode: 'jsonObject',
+				payloadCustomFieldBulkUpdateDefinitionsJsonObject: JSON.stringify({
+					ids: [definitionId],
+					isRequired: 'false',
+				}),
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -1173,18 +1236,48 @@ test('tag and custom field boolean JSON fields reject string values', async () =
 	assert.equal(customFieldOnly.calls.length, 0);
 });
 
+test('tag search validates JSON object mode before credentials are read', async () => {
+	let getCredentialsCalled = false;
+	const { context, calls } = createContext(
+		[
+			{
+				resource: 'tag',
+				operation: 'search',
+				payloadInputMode: 'jsonObject',
+				payloadTagSearchJsonObject: '{"pagination":{"sortBy":"name"}}',
+			},
+		],
+		() => ({ id: 'should-not-run' }),
+	);
+	context.getCredentials = async () => {
+		getCredentialsCalled = true;
+		return {
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		};
+	};
+
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	await assert.rejects(node.execute.call(context), /Unsupported Tag search sort field: name/);
+	assert.equal(calls.length, 0);
+	assert.equal(getCredentialsCalled, false);
+});
+
 test('admin search operations emit one item per paginated data row', async () => {
 	const { result, calls } = await execute(
 		[
 			{
 				resource: 'tag',
 				operation: 'search',
-				tagBody: '{"pagination":{"page":1,"pageSize":2}}',
+				payloadInputMode: 'jsonObject',
+				payloadTagSearchJsonObject: '{"pagination":{"page":1,"pageSize":2}}',
 			},
 			{
 				resource: 'customField',
 				operation: 'searchDefinitions',
-				customFieldBody: '{"pagination":{"page":1,"pageSize":1}}',
+				payloadInputMode: 'jsonObject',
+				payloadCustomFieldSearchDefinitionsJsonObject: '{"pagination":{"page":1,"pageSize":1}}',
 			},
 		],
 		(options) => {
@@ -1232,13 +1325,16 @@ test('custom field operations call group, definition, and value endpoints', asyn
 			{
 				resource: 'customField',
 				operation: 'createGroup',
-				customFieldBody: '{"name":"Classification","description":"Routing","sortOrder":10}',
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldGroupFields:
+					'{"name":"Classification","description":"Routing","sortOrder":10}',
 			},
 			{
 				resource: 'customField',
 				operation: 'updateGroup',
 				customFieldGroupId: groupId,
-				customFieldBody: '{"name":"Updated Classification"}',
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldGroupFields: '{"name":"Updated Classification"}',
 			},
 			{
 				resource: 'customField',
@@ -1250,12 +1346,15 @@ test('custom field operations call group, definition, and value endpoints', asyn
 			{
 				resource: 'customField',
 				operation: 'searchDefinitions',
-				customFieldBody: '{"pagination":{"page":1,"pageSize":25}}',
+				payloadInputMode: 'individualFields',
+				payloadSearchPage: 1,
+				payloadSearchPageSize: 25,
 			},
 			{
 				resource: 'customField',
 				operation: 'createDefinition',
-				customFieldBody: JSON.stringify({
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldDefinitionFields: JSON.stringify({
 					name: 'Business Unit',
 					fieldType: 'SELECT',
 					options: ['finance', 'ops'],
@@ -1267,12 +1366,14 @@ test('custom field operations call group, definition, and value endpoints', asyn
 				resource: 'customField',
 				operation: 'updateDefinition',
 				customFieldDefinitionId: definitionId,
-				customFieldBody: '{"name":"Business Impact","isRequired":true}',
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldDefinitionFields: '{"name":"Business Impact","isRequired":true}',
 			},
 			{
 				resource: 'customField',
 				operation: 'bulkUpdateDefinitions',
-				customFieldBody: JSON.stringify({
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldDefinitionBulkFields: JSON.stringify({
 					ids: [definitionId, secondDefinitionId],
 					isRequired: false,
 					groupId,
@@ -1287,7 +1388,9 @@ test('custom field operations call group, definition, and value endpoints', asyn
 			{
 				resource: 'customField',
 				operation: 'bulkDeleteDefinitions',
-				customFieldBody: JSON.stringify({ ids: [definitionId, secondDefinitionId], force: true }),
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldDefinitionIds: JSON.stringify([definitionId, secondDefinitionId]),
+				payloadCustomFieldDefinitionForce: true,
 			},
 			{ resource: 'customField', operation: 'getValues', entityType: 'ALERT', entityId: alertId },
 			{
@@ -1300,14 +1403,16 @@ test('custom field operations call group, definition, and value endpoints', asyn
 				resource: 'customField',
 				operation: 'batchGetValues',
 				entityType: 'OBSERVABLE',
-				entityIds: JSON.stringify([observableId]),
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldEntityIds: JSON.stringify([observableId]),
 			},
 			{
 				resource: 'customField',
 				operation: 'replaceValues',
 				entityType: 'KNOWLEDGE',
 				entityId: knowledgeId,
-				customFieldValues: JSON.stringify([
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldValues: JSON.stringify([
 					{ fieldId: definitionId, value: ['pci', 'sox'], fieldType: 'MULTI_SELECT' },
 				]),
 			},
@@ -1356,7 +1461,9 @@ test('custom field operations call group, definition, and value endpoints', asyn
 		calls[5].url,
 		'https://hustleops.example.com/api/v1/custom-fields/definitions/search',
 	);
-	assert.deepEqual(calls[5].body, { pagination: { page: 1, pageSize: 25 } });
+	assert.deepEqual(calls[5].body, {
+		pagination: { page: 1, pageSize: 25, sortBy: 'createdAt', sortOrder: 'desc' },
+	});
 
 	assert.equal(calls[6].method, 'POST');
 	assert.equal(calls[6].url, 'https://hustleops.example.com/api/v1/custom-fields/definitions');
@@ -1422,6 +1529,36 @@ test('custom field operations call group, definition, and value endpoints', asyn
 	});
 });
 
+test('custom field batch get values supports individual fields and JSON object mode', async () => {
+	const firstId = '11111111-1111-4111-8111-111111111111';
+	const secondId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[
+			{
+				resource: 'customField',
+				operation: 'batchGetValues',
+				entityType: 'ALERT',
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldEntityIds: JSON.stringify([firstId]),
+			},
+			{
+				resource: 'customField',
+				operation: 'batchGetValues',
+				entityType: 'ALERT',
+				payloadInputMode: 'jsonObject',
+				payloadCustomFieldBatchGetValuesJsonObject: JSON.stringify({
+					entityType: 'INCIDENT',
+					entityIds: [secondId],
+				}),
+			},
+		],
+		() => ({ ok: true }),
+	);
+
+	assert.deepEqual(calls[0].body, { entityType: 'ALERT', entityIds: [firstId] });
+	assert.deepEqual(calls[1].body, { entityType: 'INCIDENT', entityIds: [secondId] });
+});
+
 test('custom field safe selected updates merge with existing attached fields', async () => {
 	const entityId = '11111111-1111-4111-8111-111111111111';
 	const updatedFieldId = '22222222-2222-4222-8222-222222222222';
@@ -1433,7 +1570,8 @@ test('custom field safe selected updates merge with existing attached fields', a
 				operation: 'updateSelectedValuesSafely',
 				entityType: 'INCIDENT',
 				entityId,
-				customFieldValues: JSON.stringify([{ fieldId: updatedFieldId, value: 'critical' }]),
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldValues: JSON.stringify([{ fieldId: updatedFieldId, value: 'critical' }]),
 			},
 		],
 		(options) => {
@@ -1476,7 +1614,8 @@ test('custom field updates reject immutable fieldType changes and oversized batc
 				resource: 'customField',
 				operation: 'updateDefinition',
 				customFieldDefinitionId: definitionId,
-				customFieldBody: '{"fieldType":"BOOLEAN"}',
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldDefinitionFields: '{"fieldType":"BOOLEAN"}',
 			},
 		],
 		() => ({ id: 'should-not-run' }),
@@ -1497,7 +1636,8 @@ test('custom field updates reject immutable fieldType changes and oversized batc
 				resource: 'customField',
 				operation: 'batchGetValues',
 				entityType: 'ALERT',
-				entityIds: JSON.stringify(ids),
+				payloadInputMode: 'individualFields',
+				payloadCustomFieldEntityIds: JSON.stringify(ids),
 			},
 		],
 		() => ({ id: 'should-not-run' }),

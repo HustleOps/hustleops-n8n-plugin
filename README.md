@@ -16,15 +16,18 @@ The current package supports live HustleOps API requests for core alert, inciden
 | Tag          | List, Search, Create, Update Color, Bulk Update Color, Delete, Bulk Delete                                                                                                                                                                                                                         |
 | Custom Field | List Groups, Create Group, Update Group, Delete Group, List Definitions, Search Definitions, Create Definition, Update Definition, Bulk Update Definitions, Delete Definition, Bulk Delete Definitions, Get Values, Get Available, Batch Get Values, Replace Values, Update Selected Values Safely |
 
-Search operations call HustleOps `/search` endpoints with a JSON Search Body. Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
+Payload operations expose an **Input Mode** selector.
 
-Create and Update operations expose common DTO fields directly in the node. Required create fields appear as normal n8n fields. Optional create fields are available under `Additional Fields`, and update payload fields are available under `Fields to Update`.
+- **Individual Fields** is the default. The node builds the request body from visible fields and validates the body before it reads credentials or calls HustleOps.
+- **JSON Object** submits the JSON object as the complete request body. JSON Object mode is full replacement: values left in hidden Individual Fields controls are ignored.
 
 Structured enum fields render as dropdowns. Picklist-backed fields such as alert type/status, incident status/category, observable type/threat level/criticality, and knowledge type load their dropdown options from HustleOps `/picklists/:domain` endpoints and send the selected API value in the create or update payload.
 
 Use `Additional JSON` only for advanced supported fields or intentional overrides. `Additional JSON` is merged after structured fields, so duplicate keys in `Additional JSON` win. Unsupported fields still fail before the API request is sent.
 
-Workflows saved with the old `Body` field continue to run through a hidden legacy fallback when no structured fields or `Additional JSON` values are set. New workflows should use structured fields and `Additional JSON`.
+Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
+
+Required create fields appear as normal n8n fields in Individual Fields mode. Optional create fields are available under `Additional Fields`, and update payload fields are available under `Fields to Update`. Unsupported fields still fail before the API request is sent.
 
 ## Tag Operations
 
@@ -46,6 +49,15 @@ The `Tag` resource covers admin tag management:
 - `Delete`: calls `DELETE /tags/:id?force=true` when Force is enabled.
 - `Bulk Delete`: calls `POST /tags/bulk-delete` with `{ "ids": [...], "force": true }`.
 
+Tag payload operations support **Input Mode**. In **Individual Fields** mode, use fields such as `Tag Value`, `Tag Color`, `Tag IDs`, and `Force`. In **JSON Object** mode, submit the complete tag payload, for example:
+
+```json
+{
+	"ids": ["11111111-1111-4111-8111-111111111111"],
+	"force": true
+}
+```
+
 ## Custom Field Operations
 
 The `Custom Field` resource covers custom field groups, definitions, and values.
@@ -59,6 +71,15 @@ Value operations use uppercase entity types: `ALERT`, `INCIDENT`, `OBSERVABLE`, 
 - `Batch Get Values`: calls `POST /custom-fields/values/batch` with `{ "entityType": "ALERT", "entityIds": [...] }` and allows up to 100 IDs.
 - `Replace Values`: calls `PATCH /custom-fields/values/:entityType/:entityId` with the exact attached field set to keep.
 - `Update Selected Values Safely`: first reads existing values, merges selected field changes, then patches the complete attached field set so omitted attached fields are preserved.
+
+Custom field write operations support **Input Mode**. In **Individual Fields** mode, use the visible group, definition, definition ID, entity ID list, or attached field row controls for the selected operation. In **JSON Object** mode, submit the complete payload, for example:
+
+```json
+{
+	"entityType": "INCIDENT",
+	"entityIds": ["22222222-2222-4222-8222-222222222222"]
+}
+```
 
 Custom field values sent to the API are strings or `null`. `MULTI_SELECT` array inputs are serialized with `JSON.stringify`, so `["a", "b"]` is sent as `"[\"a\",\"b\"]"`. BOOLEAN values must be `"true"` or `"false"`; NUMBER, DATE, and URL values are validated before sending.
 
@@ -90,7 +111,7 @@ API keys act as the user who owns the key, so role and permission checks still a
 
 ## Create Examples
 
-Set these values through node fields rather than a generic Body editor. The JSON below shows the API payload produced from the structured fields.
+With **Input Mode** set to **Individual Fields**, set these values through node fields. The JSON below shows the API payload produced from the structured fields.
 
 Alert field values:
 
@@ -180,11 +201,11 @@ Knowledge field values:
 
 ## Update Fields
 
-Update operations keep `ID` as a required field and put editable payload values under `Fields to Update`.
+Update operations keep `ID` as a required field and put editable payload values under `Fields to Update` in **Individual Fields** mode.
 
-For example, updating an Observable can set `Threat Level`, `Criticality`, and `Version` under `Fields to Update`. If `Additional JSON` also contains `criticality`, the value from `Additional JSON` is sent.
+For example, updating an Observable can set `Threat Level`, `Criticality`, and `Version` under `Fields to Update`.
 
-To clear a supported nullable field, set it to `null` in `Additional JSON`, such as `{ "summary": null }`. Blank structured update fields are omitted.
+To submit a complete update body or clear a supported nullable field, use **JSON Object** mode, such as `{ "summary": null }`. Blank Individual Fields update values are omitted.
 
 ## Search Pagination
 
@@ -201,7 +222,7 @@ Comment operations work against comment threads attached to core entities. Choos
 - `List`: calls `GET /comments` with `entityType`, `entityId`, optional `cursor`, and `take`.
 - `Search`: calls `GET /comments/search` with `entityType`, `entityId`, and `q`.
 - `Get Unread Count`: calls `GET /comments/unread-count` and returns `{ "unreadCount": number }`.
-- `Create`: calls `POST /comments` with a JSON Comment Body.
+- `Create`: calls `POST /comments` with content, parent ID, attachment IDs, or a complete JSON Object payload.
 - `Mark Read`: calls `POST /comments/read` with `entityType` and `entityId`.
 - `Update`: calls `PATCH /comments/:id` with `{ "content": "Updated containment note" }`.
 - `Delete`: calls `DELETE /comments/:id`.
@@ -216,21 +237,21 @@ Search emits one item per comment and caps emitted rows with `Max Results`, whic
 
 ### n8n Fields and Outputs
 
-| Operation        | Required n8n fields                        | Optional n8n fields                             | Output                                                                                                                        |
-| ---------------- | ------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| List             | `Entity Type`, `Entity ID`                 | `Take`, `Cursor`, `Include Cursor Metadata`     | One item per comment, or one raw response item with `items` and `nextCursor` when cursor metadata is enabled                  |
-| Search           | `Entity Type`, `Entity ID`, `Search Query` | `Max Results`                                   | One item per matching comment, up to `Max Results`                                                                            |
-| Get Unread Count | `Entity Type`, `Entity ID`                 | none                                            | `{ "unreadCount": number }`                                                                                                   |
-| Create           | `Entity Type`, `Entity ID`, `Comment Body` | `parentId`, `attachmentIds` inside Comment Body | Created comment plus `autoTransitioned`                                                                                       |
-| Mark Read        | `Entity Type`, `Entity ID`                 | none                                            | `{ "success": true, "entityType": "INCIDENT", "entityId": "11111111-1111-4111-8111-111111111111" }`                           |
-| Update           | `Comment ID`, `Comment Body`               | none                                            | Updated comment                                                                                                               |
-| Delete           | `Comment ID`                               | none                                            | `{ "id": "22222222-2222-4222-8222-222222222222", "entityType": "ALERT", "entityId": "11111111-1111-4111-8111-111111111111" }` |
-| Toggle Reaction  | `Comment ID`, `Comment Body`               | none                                            | Updated comment                                                                                                               |
-| Toggle Pin       | `Comment ID`                               | none                                            | Updated comment                                                                                                               |
+| Operation        | Required n8n fields                        | Optional n8n fields                                      | Output                                                                                                                        |
+| ---------------- | ------------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| List             | `Entity Type`, `Entity ID`                 | `Take`, `Cursor`, `Include Cursor Metadata`              | One item per comment, or one raw response item with `items` and `nextCursor` when cursor metadata is enabled                  |
+| Search           | `Entity Type`, `Entity ID`, `Search Query` | `Max Results`                                            | One item per matching comment, up to `Max Results`                                                                            |
+| Get Unread Count | `Entity Type`, `Entity ID`                 | none                                                     | `{ "unreadCount": number }`                                                                                                   |
+| Create           | `Entity Type`, `Entity ID`, `Input Mode`   | `Content`, `Parent ID`, `Attachment IDs`, or JSON Object | Created comment plus `autoTransitioned`                                                                                       |
+| Mark Read        | `Entity Type`, `Entity ID`                 | none                                                     | `{ "success": true, "entityType": "INCIDENT", "entityId": "11111111-1111-4111-8111-111111111111" }`                           |
+| Update           | `Comment ID`, `Input Mode`                 | `Content` or JSON Object                                 | Updated comment                                                                                                               |
+| Delete           | `Comment ID`                               | none                                                     | `{ "id": "22222222-2222-4222-8222-222222222222", "entityType": "ALERT", "entityId": "11111111-1111-4111-8111-111111111111" }` |
+| Toggle Reaction  | `Comment ID`, `Input Mode`                 | `Emoji` or JSON Object                                   | Updated comment                                                                                                               |
+| Toggle Pin       | `Comment ID`                               | none                                                     | Updated comment                                                                                                               |
 
-### Comment Body Examples
+### Comment Payload Examples
 
-Create comment. Set `Entity Type` and `Entity ID` in the node fields; put only create-body fields in `Comment Body`:
+Create comment in **Individual Fields** mode. Set `Entity Type`, `Entity ID`, and `Content` in the node fields. The request body is:
 
 ```json
 {
@@ -238,7 +259,7 @@ Create comment. Set `Entity Type` and `Entity ID` in the node fields; put only c
 }
 ```
 
-Create reply. Set `Entity Type` and `Entity ID` in the node fields:
+Create reply in **JSON Object** mode. Set `Entity Type` and `Entity ID` in the node fields, then submit this complete JSON Object:
 
 ```json
 {
@@ -247,7 +268,7 @@ Create reply. Set `Entity Type` and `Entity ID` in the node fields:
 }
 ```
 
-Create comment with staged attachments. Set `Entity Type` and `Entity ID` in the node fields:
+Create comment with staged attachments in **JSON Object** mode. Set `Entity Type` and `Entity ID` in the node fields, then submit this complete JSON Object:
 
 ```json
 {
@@ -255,7 +276,7 @@ Create comment with staged attachments. Set `Entity Type` and `Entity ID` in the
 }
 ```
 
-Update comment:
+Update comment in **Individual Fields** mode by setting `Content`, or submit this complete JSON Object in **JSON Object** mode:
 
 ```json
 {
@@ -263,7 +284,7 @@ Update comment:
 }
 ```
 
-Toggle reaction:
+Toggle reaction in **Individual Fields** mode by setting `Emoji`, or submit this complete JSON Object in **JSON Object** mode:
 
 ```json
 {

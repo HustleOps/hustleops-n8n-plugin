@@ -1,6 +1,6 @@
 {
 	"name": "@hustleops-n8n/n8n-nodes-hustleops",
-	"version": "0.1.1",
+	"version": "0.1.3",
 	"description": "n8n community node package for HustleOps incident response workflows.",
 	"license": "MIT",
 	"author": {

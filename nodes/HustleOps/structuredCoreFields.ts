@@ -1,8 +1,6 @@
 import type { CoreResource, DtoOperation } from './resourceDefinitions';
 
 export const CORE_WRITE_OPERATIONS: DtoOperation[] = ['create', 'update'];
-export const ADDITIONAL_JSON_PARAMETER = 'additionalJson';
-export const LEGACY_BODY_PARAMETER = 'body';
 
 export function toPascalCase(value: string): string {
 	return value.replace(/(^|[-_\s]+)([a-z0-9])/g, (_match, _separator, character: string) =>
