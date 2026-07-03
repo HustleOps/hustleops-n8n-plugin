@@ -377,7 +377,7 @@ Before the first workflow release, configure:
 
 - npm Trusted Publishing for `HustleOps/hustleops-n8n-plugin` and `.github/workflows/release.yml`.
 - GitHub branch protection or a ruleset for `main`.
-- The release bypass actor or `RELEASE_BYPASS_TOKEN`, if `GITHUB_TOKEN` cannot bypass protection when pushing the generated release commit and tag.
+- `RELEASE_BYPASS_TOKEN` as a repository secret. The token must belong to an actor allowed to bypass the `main` ruleset for generated release commits and tags, including rules that require pull requests or status checks.
 
 After publication, install the package in a self-hosted n8n instance with:
 

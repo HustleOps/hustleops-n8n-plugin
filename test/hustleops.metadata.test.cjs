@@ -763,6 +763,14 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /name:\s*Require release workflow from main/);
 	assert.match(releaseWorkflow, /\$GITHUB_REF" != "refs\/heads\/main"/);
 	assert.match(releaseWorkflow, /Release workflow must be run from main/);
+	assert.match(releaseWorkflow, /name:\s*Require release bypass token/);
+	assert.match(
+		releaseWorkflow,
+		/RELEASE_BYPASS_TOKEN:\s*\$\{\{ secrets\.RELEASE_BYPASS_TOKEN \}\}/,
+	);
+	assert.match(releaseWorkflow, /RELEASE_BYPASS_TOKEN must be configured/);
+	assert.match(releaseWorkflow, /token:\s*\$\{\{ secrets\.RELEASE_BYPASS_TOKEN \}\}/);
+	assert.doesNotMatch(releaseWorkflow, /secrets\.RELEASE_BYPASS_TOKEN \|\| github\.token/);
 	const preflightIndex = releaseWorkflow.indexOf('name: Release preflight');
 	const prepareIndex = releaseWorkflow.indexOf('name: Prepare release files');
 	const verifyIndex = releaseWorkflow.indexOf('name: Verify prepared release state');
@@ -915,6 +923,9 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Conventional Commits/i);
 	assert.match(readme, /Trusted Publishing/i);
 	assert.match(readme, /publishes to npm with provenance/i);
+	assert.match(readme, /RELEASE_BYPASS_TOKEN/i);
+	assert.match(readme, /allowed to bypass the `main` ruleset/i);
+	assert.match(readme, /require pull requests or status checks/i);
 	assert.doesNotMatch(readme, /GitHub Packages/i);
 	assert.doesNotMatch(readme, /npm run release/i);
 	assert.match(readme, /Creator Portal/i);

@@ -35,12 +35,22 @@ jobs:
             exit 1
           fi
 
+      - name: Require release bypass token
+        env:
+          RELEASE_BYPASS_TOKEN: ${{ secrets.RELEASE_BYPASS_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_BYPASS_TOKEN" ]; then
+            echo "::error::RELEASE_BYPASS_TOKEN must be configured with an actor allowed to bypass the main branch ruleset for generated release commits and tags."
+            exit 1
+          fi
+
       - name: Check out main
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.RELEASE_BYPASS_TOKEN || github.token }}
+          token: ${{ secrets.RELEASE_BYPASS_TOKEN }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -135,7 +145,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md package.json package-lock.json
           git commit -m "chore(release): $RELEASE_TAG"
-          git push origin HEAD:main
+          if ! git push origin HEAD:main; then
+            echo "::error::Failed to push the generated release commit. Ensure RELEASE_BYPASS_TOKEN belongs to an actor allowed to bypass the main branch ruleset requiring pull requests and status checks."
+            exit 1
+          fi
 
       - name: Verify prepared release state
         run: |
