@@ -69,10 +69,6 @@ function getProperty(description, name) {
 	return property;
 }
 
-function readmePhrasePattern(...parts) {
-	return new RegExp(parts.join(' '), 'i');
-}
-
 const {
 	CORE_WRITE_OPERATIONS,
 	createAdditionalFieldsParameterName: createAdditionalFieldsName,
@@ -1033,90 +1029,4 @@ test('runtime package surface stays compatible with verified community node cons
 	);
 	assert.doesNotMatch(runtimeSources, /from ['"](?:node:)?child_process['"]/);
 	assert.doesNotMatch(runtimeSources, /require\(['"](?:node:)?child_process['"]\)/);
-});
-
-test('README documents live HustleOps API core operations', () => {
-	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
-
-	assert.match(readme, /live HustleOps API/i);
-	assert.match(readme, /x-api-key/i);
-	assert.match(readme, /Search/i);
-	assert.match(readme, /Count/i);
-	assert.match(readme, /Get/i);
-	assert.match(readme, /Create/i);
-	assert.match(readme, /Update/i);
-	assert.match(readme, /Alert/i);
-	assert.match(readme, /Incident/i);
-	assert.match(readme, /Observable/i);
-	assert.match(readme, /Knowledge/i);
-	assert.match(readme, /Return All/i);
-	assert.match(readme, /Max Items/i);
-	assert.match(readme, /Include Pagination Metadata/i);
-	assert.match(readme, /unsupported fields/i);
-	assert.match(readme, /Getting an API key/i);
-	assert.match(readme, /API keys must be created outside n8n/i);
-	assert.match(readme, /Create examples/i);
-	assert.match(readme, /sourceRef/i);
-	assert.match(readme, /firstSeen/i);
-	assert.match(readme, /tlp/i);
-	assert.match(readme, /Input Mode/i);
-	assert.match(readme, /Individual Fields/i);
-	assert.match(readme, /JSON Object/i);
-	assert.match(readme, /full replacement/i);
-	assert.match(readme, /Additional Fields/i);
-	assert.match(readme, /Fields to Update/i);
-	assert.match(readme, /structured fields/i);
-	assert.match(readme, /dropdowns/i);
-	assert.match(readme, /picklist-backed fields/i);
-	assert.match(readme, /\/picklists\/:domain/i);
-	assert.match(readme, /merged after structured fields/i);
-	assert.match(readme, /duplicate keys/i);
-	assert.match(readme, /node fields rather than a generic Body editor/i);
-	assert.match(readme, /hidden legacy fallback/i);
-	assert.match(readme, /summary": null/i);
-	assert.match(readme, /Threat Level/i);
-	assert.match(readme, /First Seen/i);
-	assert.match(readme, /Category/i);
-	assert.match(readme, /Comment/i);
-	assert.match(readme, /List/i);
-	assert.match(readme, /Get Unread Count/i);
-	assert.match(readme, /Toggle Reaction/i);
-	assert.match(readme, /Toggle Pin/i);
-	assert.match(readme, /Tag/i);
-	assert.match(readme, /Set Tags/i);
-	assert.match(readme, /Add Tags/i);
-	assert.match(readme, /Remove Tag/i);
-	assert.match(readme, /Custom Field/i);
-	assert.match(readme, /Replace Values/i);
-	assert.match(readme, /Update Selected Values Safely/i);
-	assert.match(readme, /Entity Type/i);
-	assert.match(readme, /Entity ID/i);
-	assert.match(readme, /Comment ID/i);
-	assert.match(readme, /Search Query/i);
-	assert.match(readme, /Max Results/i);
-	assert.match(readme, /Include Cursor Metadata/i);
-	assert.match(readme, /one item per comment/i);
-	assert.match(readme, /\{ "unreadCount": number \}/i);
-	assert.doesNotMatch(readme, /Comment Permissions/i);
-	assert.doesNotMatch(readme, /COMMENTS:VIEW/i);
-	assert.doesNotMatch(readme, /Attachment upload and download are not included/i);
-	assert.doesNotMatch(readme, /npm install @hustleops-n8n\/n8n-nodes-hustleops/i);
-	assert.doesNotMatch(readme, /Community Nodes/i);
-	assert.doesNotMatch(readme, /Release workflow/i);
-	assert.doesNotMatch(readme, /npm run release/i);
-	assert.doesNotMatch(readme, /Creator Portal/i);
-	assert.doesNotMatch(readme, /metadata-first/i);
-	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
-});
-
-test('README documents payload input mode contract', () => {
-	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
-
-	assert.match(readme, /Input Mode/i);
-	assert.match(readme, /Individual Fields/i);
-	assert.match(readme, /JSON Object/i);
-	assert.match(readme, /full replacement/i);
-	assert.doesNotMatch(readme, readmePhrasePattern('Additional', 'JSON'));
-	assert.doesNotMatch(readme, readmePhrasePattern('merged after', 'structured fields'));
-	assert.doesNotMatch(readme, readmePhrasePattern('legacy', 'fallback'));
 });

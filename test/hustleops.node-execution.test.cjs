@@ -132,7 +132,6 @@ test('selected picklist dropdown values are sent unchanged in structured payload
 				[createAdditionalFieldsName('alert')]: {
 					status: 'triage',
 				},
-				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: 'alert-id-1', displayId: 'ALT-1' }),
@@ -163,7 +162,6 @@ test('observable enum picklist selections are sent as API enum values', async ()
 					threatLevel: 'SUSPICIOUS',
 					criticality: 'LOW',
 				},
-				[ADDITIONAL_JSON_PARAMETER]: '{}',
 			},
 		],
 		() => ({ id: observableId, threatLevel: 'SUSPICIOUS', criticality: 'LOW' }),
