@@ -763,14 +763,37 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /name:\s*Require release workflow from main/);
 	assert.match(releaseWorkflow, /\$GITHUB_REF" != "refs\/heads\/main"/);
 	assert.match(releaseWorkflow, /Release workflow must be run from main/);
-	assert.match(releaseWorkflow, /name:\s*Require release bypass token/);
+	assert.match(releaseWorkflow, /name:\s*Require release app credentials/);
 	assert.match(
 		releaseWorkflow,
-		/RELEASE_BYPASS_TOKEN:\s*\$\{\{ secrets\.RELEASE_BYPASS_TOKEN \}\}/,
+		/N8N_PLUGIN_RELEASE_APP_CLIENT_ID:\s*\$\{\{ vars\.N8N_PLUGIN_RELEASE_APP_CLIENT_ID \|\| secrets\.N8N_PLUGIN_RELEASE_APP_CLIENT_ID \}\}/,
 	);
-	assert.match(releaseWorkflow, /RELEASE_BYPASS_TOKEN must be configured/);
-	assert.match(releaseWorkflow, /token:\s*\$\{\{ secrets\.RELEASE_BYPASS_TOKEN \}\}/);
+	assert.match(
+		releaseWorkflow,
+		/N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY:\s*\$\{\{ secrets\.N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY \}\}/,
+	);
+	assert.match(releaseWorkflow, /N8N_PLUGIN_RELEASE_APP_CLIENT_ID must be configured/);
+	assert.match(releaseWorkflow, /N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY must be configured/);
+	assert.match(releaseWorkflow, /name:\s*Create release app token/);
+	assert.match(releaseWorkflow, /id:\s*release_app/);
+	assert.match(
+		releaseWorkflow,
+		/payload="\{\\"iat\\":\$\{iat\},\\"exp\\":\$\{exp\},\\"iss\\":\\"\$N8N_PLUGIN_RELEASE_APP_CLIENT_ID\\"\}"/,
+	);
+	assert.match(releaseWorkflow, /Authorization: Bearer \$jwt/);
+	assert.match(releaseWorkflow, /\/repos\/\$GITHUB_REPOSITORY\/installation/);
+	assert.match(releaseWorkflow, /\/app\/installations\/\$installation_id\/access_tokens/);
+	assert.match(releaseWorkflow, /"permissions":\{"contents":"write"\}/);
+	assert.match(releaseWorkflow, /echo "::add-mask::\$token"/);
+	assert.match(releaseWorkflow, /token:\s*\$\{\{ steps\.release_app\.outputs\.token \}\}/);
+	assert.match(releaseWorkflow, /name:\s*Resolve release app bot identity/);
+	assert.match(
+		releaseWorkflow,
+		/gh api '\/users\/\$\{\{ steps\.release_app\.outputs\.app-slug \}\}\[bot\]' --jq \.id/,
+	);
 	assert.doesNotMatch(releaseWorkflow, /secrets\.RELEASE_BYPASS_TOKEN \|\| github\.token/);
+	assert.doesNotMatch(releaseWorkflow, /token:\s*\$\{\{ secrets\.RELEASE_BYPASS_TOKEN \}\}/);
+	assert.doesNotMatch(releaseWorkflow, /GH_TOKEN:\s*\$\{\{ github\.token \}\}/);
 	const preflightIndex = releaseWorkflow.indexOf('name: Release preflight');
 	const prepareIndex = releaseWorkflow.indexOf('name: Prepare release files');
 	const verifyIndex = releaseWorkflow.indexOf('name: Verify prepared release state');
@@ -792,7 +815,14 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /release_already_prepared/);
 	assert.match(releaseWorkflow, /git diff --name-only/);
 	assert.match(releaseWorkflow, /CHANGELOG\.md\|package\.json\|package-lock\.json/);
-	assert.match(releaseWorkflow, /git config user\.name "github-actions\[bot\]"/);
+	assert.match(
+		releaseWorkflow,
+		/git config user\.name "\$\{\{ steps\.release_app\.outputs\.app-slug \}\}\[bot\]"/,
+	);
+	assert.match(
+		releaseWorkflow,
+		/git config user\.email "\$\{\{ steps\.release_app_user\.outputs\.user-id \}\}\+\$\{\{ steps\.release_app\.outputs\.app-slug \}\}\[bot\]@users\.noreply\.github\.com"/,
+	);
 	assert.match(releaseWorkflow, /git commit -m "chore\(release\): \$RELEASE_TAG"/);
 	assert.match(releaseWorkflow, /git push origin HEAD:main/);
 	assert.match(
@@ -923,7 +953,9 @@ test('README documents live HustleOps API core operations', () => {
 	assert.match(readme, /Conventional Commits/i);
 	assert.match(readme, /Trusted Publishing/i);
 	assert.match(readme, /publishes to npm with provenance/i);
-	assert.match(readme, /RELEASE_BYPASS_TOKEN/i);
+	assert.match(readme, /N8N_PLUGIN_RELEASE_APP_CLIENT_ID/i);
+	assert.match(readme, /N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY/i);
+	assert.match(readme, /GitHub App/i);
 	assert.match(readme, /allowed to bypass the `main` ruleset/i);
 	assert.match(readme, /require pull requests or status checks/i);
 	assert.doesNotMatch(readme, /GitHub Packages/i);

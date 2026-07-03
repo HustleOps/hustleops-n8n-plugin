@@ -35,22 +35,89 @@ jobs:
             exit 1
           fi
 
-      - name: Require release bypass token
+      - name: Require release app credentials
         env:
-          RELEASE_BYPASS_TOKEN: ${{ secrets.RELEASE_BYPASS_TOKEN }}
+          N8N_PLUGIN_RELEASE_APP_CLIENT_ID: ${{ vars.N8N_PLUGIN_RELEASE_APP_CLIENT_ID || secrets.N8N_PLUGIN_RELEASE_APP_CLIENT_ID }}
+          N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY: ${{ secrets.N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "$RELEASE_BYPASS_TOKEN" ]; then
-            echo "::error::RELEASE_BYPASS_TOKEN must be configured with an actor allowed to bypass the main branch ruleset for generated release commits and tags."
+          if [ -z "$N8N_PLUGIN_RELEASE_APP_CLIENT_ID" ]; then
+            echo "::error::N8N_PLUGIN_RELEASE_APP_CLIENT_ID must be configured as a repository variable or secret."
             exit 1
           fi
+          if [ -z "$N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY" ]; then
+            echo "::error::N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY must be configured as a repository secret."
+            exit 1
+          fi
+
+      - name: Create release app token
+        id: release_app
+        env:
+          N8N_PLUGIN_RELEASE_APP_CLIENT_ID: ${{ vars.N8N_PLUGIN_RELEASE_APP_CLIENT_ID || secrets.N8N_PLUGIN_RELEASE_APP_CLIENT_ID }}
+          N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY: ${{ secrets.N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          b64enc() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
+
+          now="$(date +%s)"
+          iat="$((now - 60))"
+          exp="$((now + 600))"
+          private_key="${N8N_PLUGIN_RELEASE_APP_PRIVATE_KEY//\\n/$'\n'}"
+          header='{"alg":"RS256","typ":"JWT"}'
+          payload="{\"iat\":${iat},\"exp\":${exp},\"iss\":\"$N8N_PLUGIN_RELEASE_APP_CLIENT_ID\"}"
+          unsigned="$(printf '%s' "$header" | b64enc).$(printf '%s' "$payload" | b64enc)"
+          signature="$(
+            printf '%s' "$unsigned" |
+              openssl dgst -sha256 -sign <(printf '%s' "$private_key") -binary |
+              b64enc
+          )"
+          jwt="${unsigned}.${signature}"
+
+          app_json="$(
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $jwt" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/app
+          )"
+          app_slug="$(jq -r .slug <<<"$app_json")"
+          installation_id="$(
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $jwt" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/installation" |
+              jq -r .id
+          )"
+          token_response="$(
+            curl -fsSL \
+              -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $jwt" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -d '{"permissions":{"contents":"write"}}' \
+              "https://api.github.com/app/installations/$installation_id/access_tokens"
+          )"
+          token="$(jq -r .token <<<"$token_response")"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "app-slug=$app_slug" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve release app bot identity
+        id: release_app_user
+        env:
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
+        run: |
+          set -euo pipefail
+          user_id="$(gh api '/users/${{ steps.release_app.outputs.app-slug }}[bot]' --jq .id)"
+          echo "user-id=$user_id" >> "$GITHUB_OUTPUT"
 
       - name: Check out main
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: main
-          token: ${{ secrets.RELEASE_BYPASS_TOKEN }}
+          token: ${{ steps.release_app.outputs.token }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v5
@@ -141,12 +208,12 @@ jobs:
           BASE_SHA="$(git rev-parse HEAD)"
           git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
           test "$BASE_SHA" = "$(git rev-parse origin/main)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "${{ steps.release_app.outputs.app-slug }}[bot]"
+          git config user.email "${{ steps.release_app_user.outputs.user-id }}+${{ steps.release_app.outputs.app-slug }}[bot]@users.noreply.github.com"
           git add CHANGELOG.md package.json package-lock.json
           git commit -m "chore(release): $RELEASE_TAG"
           if ! git push origin HEAD:main; then
-            echo "::error::Failed to push the generated release commit. Ensure RELEASE_BYPASS_TOKEN belongs to an actor allowed to bypass the main branch ruleset requiring pull requests and status checks."
+            echo "::error::Failed to push the generated release commit. Ensure the N8N plugin release GitHub App is installed on this repository, has contents:write, and is allowed to bypass the main branch ruleset requiring pull requests and status checks."
             exit 1
           fi
 
@@ -177,7 +244,7 @@ jobs:
 
       - name: Create draft GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
         run: |
           set -euo pipefail
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
@@ -194,5 +261,5 @@ jobs:
 
       - name: Publish GitHub Release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.release_app.outputs.token }}
         run: gh release edit "$RELEASE_TAG" --draft=false
