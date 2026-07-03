@@ -20,6 +20,8 @@ Search operations call HustleOps `/search` endpoints with a JSON Search Body. Co
 
 Create and Update operations expose common DTO fields directly in the node. Required create fields appear as normal n8n fields. Optional create fields are available under `Additional Fields`, and update payload fields are available under `Fields to Update`.
 
+Structured enum fields render as dropdowns. Picklist-backed fields such as alert type/status, incident status/category, observable type/threat level/criticality, and knowledge type load their dropdown options from HustleOps `/picklists/:domain` endpoints and send the selected API value in the create or update payload.
+
 Use `Additional JSON` only for advanced supported fields or intentional overrides. `Additional JSON` is merged after structured fields, so duplicate keys in `Additional JSON` win. Unsupported fields still fail before the API request is sent.
 
 Workflows saved with the old `Body` field continue to run through a hidden legacy fallback when no structured fields or `Additional JSON` values are set. New workflows should use structured fields and `Additional JSON`.

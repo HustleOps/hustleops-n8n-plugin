@@ -10,6 +10,8 @@ export type FieldSpec = {
 	type: 'string' | 'number' | 'boolean' | 'uuid' | 'uuid[]' | 'enum' | 'date-time' | 'url' | 'tags';
 	requiredForCreate?: boolean;
 	allowedValues?: readonly string[];
+	picklistDomain?: string;
+	picklistValueTransform?: 'uppercase';
 	maxLength?: number;
 	nonEmpty?: boolean;
 	pattern?: RegExp;
@@ -59,6 +61,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 const ALERT_SOURCE_PATTERN = /^[a-zA-Z0-9:\-_]+$/;
 const SEVERITY_VALUES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const;
 const TLP_VALUES = ['RED', 'AMBER_STRICT', 'AMBER', 'GREEN', 'CLEAR'] as const;
+const THREAT_LEVEL_VALUES = ['MALICIOUS', 'SUSPICIOUS', 'UNKNOWN', 'BENIGN'] as const;
+const CRITICALITY_VALUES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'] as const;
 const RESOURCE_DEFINITION_NODE: INode = {
 	id: 'hustleops-resource-definitions',
 	name: 'HustleOps',
@@ -231,6 +235,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				type: 'string',
 				requiredForCreate: true,
 				nonEmpty: true,
+				picklistDomain: 'alertType',
 				description:
 					'Must match an active alertType picklist value in HustleOps, such as authentication, endpoint, email, network, dns, user_activity, or other on a default instance.',
 			},
@@ -246,6 +251,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'status',
 				type: 'string',
 				nonEmpty: true,
+				picklistDomain: 'alertStatus',
 				description: 'Must match an active alertStatus picklist value in HustleOps when provided.',
 			},
 			detectedAt: { name: 'detectedAt', type: 'date-time', requiredForCreate: true },
@@ -314,6 +320,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				name: 'status',
 				type: 'string',
 				nonEmpty: true,
+				picklistDomain: 'incidentStatus',
 				description:
 					'Must match an active incidentStatus picklist value in HustleOps when provided.',
 			},
@@ -322,6 +329,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				type: 'string',
 				requiredForCreate: true,
 				nonEmpty: true,
+				picklistDomain: 'incidentCategory',
 				description: 'Must match an active incidentCategory picklist value in HustleOps.',
 			},
 			assigneeId: { name: 'assigneeId', type: 'uuid' },
@@ -373,16 +381,30 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				type: 'string',
 				requiredForCreate: true,
 				nonEmpty: true,
+				picklistDomain: 'observableType',
 				description: 'Must match an active observableType picklist value in HustleOps.',
 			},
-			threatLevel: { name: 'threatLevel', type: 'string', requiredForCreate: true },
+			threatLevel: {
+				name: 'threatLevel',
+				type: 'enum',
+				requiredForCreate: true,
+				allowedValues: THREAT_LEVEL_VALUES,
+				picklistDomain: 'threatLevel',
+				picklistValueTransform: 'uppercase',
+			},
 			tlp: {
 				name: 'tlp',
 				type: 'enum',
 				requiredForCreate: true,
 				allowedValues: TLP_VALUES,
 			},
-			criticality: { name: 'criticality', type: 'string' },
+			criticality: {
+				name: 'criticality',
+				type: 'enum',
+				allowedValues: CRITICALITY_VALUES,
+				picklistDomain: 'criticality',
+				picklistValueTransform: 'uppercase',
+			},
 			firstSeen: { name: 'firstSeen', type: 'date-time', requiredForCreate: true },
 			lastSeen: { name: 'lastSeen', type: 'date-time', requiredForCreate: true },
 			version: { name: 'version', type: 'number' },
@@ -416,6 +438,7 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				type: 'string',
 				requiredForCreate: true,
 				nonEmpty: true,
+				picklistDomain: 'knowledgeType',
 				description: 'Must match an active knowledgeType picklist value in HustleOps.',
 			},
 			tlp: {

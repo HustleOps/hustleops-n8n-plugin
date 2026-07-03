@@ -110,6 +110,16 @@ const HUSTLEOPS_RESOURCE_OPTIONS: INodePropertyOptions[] = [
 	TAG_RESOURCE_OPTION,
 	CUSTOM_FIELD_RESOURCE_OPTION,
 ];
+const PICKLIST_LOAD_OPTIONS_METHODS: Record<string, string> = {
+	alertType: 'getAlertTypeOptions',
+	alertStatus: 'getAlertStatusOptions',
+	incidentStatus: 'getIncidentStatusOptions',
+	incidentCategory: 'getIncidentCategoryOptions',
+	observableType: 'getObservableTypeOptions',
+	threatLevel: 'getThreatLevelOptions',
+	criticality: 'getCriticalityOptions',
+	knowledgeType: 'getKnowledgeTypeOptions',
+};
 
 const CORE_OPERATION_OPTIONS: INodePropertyOptions[] = [
 	{
@@ -156,6 +166,9 @@ function fieldDefaultValue(spec: FieldSpec): string | boolean {
 }
 
 function fieldType(spec: FieldSpec): INodeProperties['type'] {
+	if (spec.picklistDomain) {
+		return 'options';
+	}
 	if (spec.type === 'string' || spec.type === 'uuid' || spec.type === 'url') {
 		return 'string';
 	}
@@ -191,6 +204,17 @@ function enumOptionDisplayName(value: string): string {
 	return fieldDisplayName(value.toLowerCase().replace(/_/g, ' '));
 }
 
+function picklistLoadOptionsMethod(domain: string): string {
+	const method = PICKLIST_LOAD_OPTIONS_METHODS[domain];
+	if (!method) {
+		throw new NodeOperationError(
+			STRUCTURED_CORE_FIELDS_NODE,
+			`Unsupported HustleOps picklist domain: ${domain}`,
+		);
+	}
+	return method;
+}
+
 function fieldDescription(
 	definition: CoreResourceDefinition,
 	field: string,
@@ -208,6 +232,9 @@ function fieldDescription(
 	}
 	if (spec.type === 'enum' && spec.allowedValues) {
 		constraints.push(`Supported values: ${spec.allowedValues.join(', ')}.`);
+	}
+	if (spec.picklistDomain) {
+		constraints.push(`Options load from the HustleOps ${spec.picklistDomain} picklist.`);
 	}
 	return [`${definition.displayName} ${fieldDisplayName(field)}.`, spec.description, ...constraints]
 		.filter(Boolean)
@@ -235,6 +262,12 @@ function buildFieldProperty(
 			name: enumOptionDisplayName(value),
 			value,
 		}));
+	}
+	if (spec.picklistDomain) {
+		property.typeOptions = {
+			loadOptionsMethod: picklistLoadOptionsMethod(spec.picklistDomain),
+		};
+		delete property.options;
 	}
 
 	return property;
@@ -769,6 +802,38 @@ function optionFromRow(row: IDataObject, fallbackPrefix: string): INodePropertyO
 	};
 }
 
+function hasOptionRows(response: unknown): boolean {
+	if (Array.isArray(response)) {
+		return true;
+	}
+	if (response && typeof response === 'object') {
+		const objectResponse = response as IDataObject;
+		return ['data', 'items', 'values'].some((key) => Array.isArray(objectResponse[key]));
+	}
+	return false;
+}
+
+function picklistOptionFromRow(
+	row: IDataObject,
+	fallbackPrefix: string,
+	valueTransform?: FieldSpec['picklistValueTransform'],
+): INodePropertyOptions | undefined {
+	if (typeof row.value !== 'string' || row.value.trim() === '') {
+		return undefined;
+	}
+	const value = valueTransform === 'uppercase' ? row.value.toUpperCase() : row.value;
+	const label =
+		typeof row.label === 'string' && row.label.trim() !== ''
+			? row.label
+			: enumOptionDisplayName(value);
+	const name = String(label || fallbackPrefix);
+	return {
+		name,
+		value,
+		description: typeof row.description === 'string' ? row.description : undefined,
+	};
+}
+
 async function loadOptionsFromPath(
 	context: ILoadOptionsFunctions,
 	path: string,
@@ -779,6 +844,25 @@ async function loadOptionsFromPath(
 	return extractOptionRows(response)
 		.map((row) => optionFromRow(row, fallbackPrefix))
 		.filter((option) => option.value !== '');
+}
+
+async function loadPicklistOptions(
+	context: ILoadOptionsFunctions,
+	domain: string,
+	fallbackPrefix: string,
+	valueTransform?: FieldSpec['picklistValueTransform'],
+): Promise<INodePropertyOptions[]> {
+	const client = await createHustleOpsApiClient(context, 0);
+	const response = await client.request('GET', `/picklists/${domain}`);
+	if (!hasOptionRows(response)) {
+		throw new NodeOperationError(
+			context.getNode(),
+			`HustleOps picklist ${domain} response must be an array or contain a data, items, or values array.`,
+		);
+	}
+	return extractOptionRows(response)
+		.map((row) => picklistOptionFromRow(row, fallbackPrefix, valueTransform))
+		.filter((option): option is INodePropertyOptions => option !== undefined);
 }
 
 async function executeTagOperation(
@@ -1678,6 +1762,32 @@ export class HustleOps implements INodeType {
 				this: ILoadOptionsFunctions,
 			): Promise<INodePropertyOptions[]> {
 				return loadOptionsFromPath(this, '/custom-fields/definitions', 'Custom Field');
+			},
+			async getAlertTypeOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'alertType', 'Alert Type');
+			},
+			async getAlertStatusOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'alertStatus', 'Alert Status');
+			},
+			async getIncidentStatusOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'incidentStatus', 'Incident Status');
+			},
+			async getIncidentCategoryOptions(
+				this: ILoadOptionsFunctions,
+			): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'incidentCategory', 'Incident Category');
+			},
+			async getObservableTypeOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'observableType', 'Observable Type');
+			},
+			async getThreatLevelOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'threatLevel', 'Threat Level', 'uppercase');
+			},
+			async getCriticalityOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'criticality', 'Criticality', 'uppercase');
+			},
+			async getKnowledgeTypeOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				return loadPicklistOptions(this, 'knowledgeType', 'Knowledge Type');
 			},
 		},
 	};
