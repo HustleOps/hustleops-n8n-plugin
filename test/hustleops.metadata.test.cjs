@@ -750,7 +750,7 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /release_tag:/);
 	assert.match(releaseWorkflow, /contents:\s*write/);
 	assert.match(releaseWorkflow, /id-token:\s*write/);
-	assert.match(releaseWorkflow, /packages:\s*write/);
+	assert.doesNotMatch(releaseWorkflow, /packages:\s*write/);
 	assert.doesNotMatch(prCheckWorkflow, /uses:\s*actions\/checkout@v4/);
 	assert.doesNotMatch(prCheckWorkflow, /uses:\s*actions\/setup-node@v4/);
 	assert.doesNotMatch(releaseWorkflow, /uses:\s*actions\/checkout@v4/);
@@ -771,14 +771,13 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	);
 	assert.match(releaseWorkflow, /chore\(release\): \$RELEASE_TAG/);
 	assert.match(releaseWorkflow, /gh release create "\$RELEASE_TAG" --draft/);
-	assert.match(releaseWorkflow, /npm publish --dry-run --registry=https:\/\/npm\.pkg\.github\.com/);
 	assert.match(
 		releaseWorkflow,
 		/npm publish --registry=https:\/\/registry\.npmjs\.org\/ --provenance/,
 	);
 	assert.match(releaseWorkflow, /steps\.npm_version\.outputs\.published/);
-	assert.match(releaseWorkflow, /steps\.github_packages_version\.outputs\.published/);
-	assert.match(releaseWorkflow, /npm\.pkg\.github\.com/);
+	assert.doesNotMatch(releaseWorkflow, /steps\.github_packages_version\.outputs\.published/);
+	assert.doesNotMatch(releaseWorkflow, /npm\.pkg\.github\.com/);
 	assert.match(releaseWorkflow, /RELEASE_MODE:\s*'true'/);
 	assert.doesNotMatch(releaseWorkflow, /secrets\.NPM_TOKEN/);
 	assert.equal(

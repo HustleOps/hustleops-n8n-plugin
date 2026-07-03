@@ -11,7 +11,6 @@ on:
 permissions:
   contents: write
   id-token: write
-  packages: write
 
 concurrency:
   group: release-${{ github.repository }}
@@ -25,7 +24,6 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
       PACKAGE_NAME: '@hustleops-n8n/n8n-nodes-hustleops'
-      GITHUB_PACKAGES_SCOPE: '@hustleops-n8n'
       NPM_CONFIG_PROVENANCE: 'true'
 
     steps:
@@ -94,45 +92,6 @@ jobs:
           fi
           echo "published=false" >> "$GITHUB_OUTPUT"
 
-      - name: Verify GitHub Packages namespace
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          OWNER="${GITHUB_PACKAGES_SCOPE#@}"
-          gh api "users/$OWNER" >/tmp/github-packages-owner.json
-
-      - name: Check GitHub Packages version availability
-        id: github_packages_version
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
-          RELEASE_ALREADY_PREPARED: ${{ steps.preflight.outputs.release_already_prepared }}
-        run: |
-          set -euo pipefail
-          PACKAGE_VERSION="${RELEASE_TAG#v}"
-          trap 'rm -f .npmrc' EXIT
-          # shellcheck disable=SC2016
-          printf '%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' "$GITHUB_PACKAGES_SCOPE" > .npmrc
-          set +e
-          npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version --registry=https://npm.pkg.github.com >/tmp/gh-version.txt 2>/tmp/gh-version.err
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -eq 0 ]; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            if [ "$RELEASE_ALREADY_PREPARED" = "true" ]; then
-              echo "$PACKAGE_NAME@$PACKAGE_VERSION already exists on GitHub Packages; treating as release recovery."
-              exit 0
-            fi
-            echo "::error::$PACKAGE_NAME@$PACKAGE_VERSION already exists on GitHub Packages"
-            cat /tmp/gh-version.txt
-            exit 1
-          fi
-          if ! grep -Eq 'E404|404 Not Found' /tmp/gh-version.err; then
-            cat /tmp/gh-version.err
-            exit "$STATUS"
-          fi
-          echo "published=false" >> "$GITHUB_OUTPUT"
-
       - name: Run pre-release quality gate
         run: |
           npm run format:check
@@ -157,18 +116,6 @@ jobs:
           npm run typecheck
           npm test
           npm pack --dry-run
-
-      - name: Verify GitHub Packages publish dry run
-        if: steps.github_packages_version.outputs.published != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
-          RELEASE_MODE: 'true'
-        run: |
-          set -euo pipefail
-          trap 'rm -f .npmrc' EXIT
-          # shellcheck disable=SC2016
-          printf '%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' "$GITHUB_PACKAGES_SCOPE" > .npmrc
-          npm publish --dry-run --registry=https://npm.pkg.github.com
 
       - name: Commit release files
         if: steps.preflight.outputs.release_already_prepared != 'true'
@@ -213,18 +160,6 @@ jobs:
         env:
           RELEASE_MODE: 'true'
         run: npm publish --registry=https://registry.npmjs.org/ --provenance
-
-      - name: Publish to GitHub Packages
-        if: steps.github_packages_version.outputs.published != 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
-          RELEASE_MODE: 'true'
-        run: |
-          set -euo pipefail
-          trap 'rm -f .npmrc' EXIT
-          # shellcheck disable=SC2016
-          printf '%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' "$GITHUB_PACKAGES_SCOPE" > .npmrc
-          npm publish --registry=https://npm.pkg.github.com
 
       - name: Publish GitHub Release
         env:
