@@ -173,28 +173,35 @@ function shouldIgnoreSslIssues(value: unknown): boolean {
 
 function getErrorBody(error: unknown): IDataObject {
 	if (error && typeof error === 'object') {
-		const maybeError = error as { response?: { body?: unknown; statusCode?: number } };
-		const body = maybeError.response?.body;
+		const maybeError = error as {
+			response?: { body?: unknown; data?: unknown; status?: number; statusCode?: number };
+		};
+		const statusCode = maybeError.response?.statusCode ?? maybeError.response?.status;
+		const body = maybeError.response?.body ?? maybeError.response?.data;
 		if (body && typeof body === 'object' && !Array.isArray(body)) {
-			return body as IDataObject;
+			return {
+				...(typeof statusCode === 'number' ? { statusCode } : {}),
+				...(body as IDataObject),
+			};
 		}
 		if (typeof body === 'string' && body.trim() !== '') {
 			try {
 				const parsed = JSON.parse(body) as unknown;
 				if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-					return parsed as IDataObject;
+					return {
+						...(typeof statusCode === 'number' ? { statusCode } : {}),
+						...(parsed as IDataObject),
+					};
 				}
 			} catch {
 				return {
-					...(maybeError.response?.statusCode
-						? { statusCode: maybeError.response.statusCode }
-						: {}),
+					...(typeof statusCode === 'number' ? { statusCode } : {}),
 					message: body,
 				};
 			}
 		}
-		if (maybeError.response?.statusCode) {
-			return { statusCode: maybeError.response.statusCode };
+		if (typeof statusCode === 'number') {
+			return { statusCode };
 		}
 	}
 
