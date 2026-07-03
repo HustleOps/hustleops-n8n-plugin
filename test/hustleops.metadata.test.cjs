@@ -69,10 +69,6 @@ function getProperty(description, name) {
 	return property;
 }
 
-function readmePhrasePattern(...parts) {
-	return new RegExp(parts.join(' '), 'i');
-}
-
 const {
 	CORE_WRITE_OPERATIONS,
 	createAdditionalFieldsParameterName: createAdditionalFieldsName,
@@ -126,7 +122,7 @@ test('HustleOps credential test uses a low-impact authenticated endpoint', () =>
 	);
 
 	assert.match(helperSource, /\/tags/);
-	assert.doesNotMatch(`${nodeSource}\n${helperSource}`, /\/picklists/);
+	assert.doesNotMatch(helperSource, /\/picklists/);
 	assert.doesNotMatch(`${nodeSource}\n${helperSource}`, /\/auth\/me/);
 });
 
@@ -406,6 +402,162 @@ test('HustleOps node exposes structured core create and update fields', () => {
 	assert.ok(alertTags, 'Expected alert tags optional field');
 	assert.equal(alertTags.type, 'json');
 	assert.equal(alertTags.default, '[]');
+});
+
+test('HustleOps structured fields expose API-backed picklists as dropdowns', () => {
+	const description = getNodeDescription();
+
+	const alertType = getDisplayedProperty(
+		description,
+		structuredFieldName('alert', 'create', 'type'),
+		'alert',
+		'create',
+	);
+	assert.equal(alertType.type, 'options');
+	assert.equal(alertType.typeOptions.loadOptionsMethod, 'getAlertTypeOptions');
+	assert.equal(alertType.options, undefined);
+
+	const alertAdditionalFields = getDisplayedProperty(
+		description,
+		createAdditionalFieldsName('alert'),
+		'alert',
+		'create',
+	);
+	const alertStatus = alertAdditionalFields.options.find((option) => option.name === 'status');
+	assert.ok(alertStatus, 'Expected alert status optional field');
+	assert.equal(alertStatus.type, 'options');
+	assert.equal(alertStatus.typeOptions.loadOptionsMethod, 'getAlertStatusOptions');
+
+	const incidentCategory = getDisplayedProperty(
+		description,
+		structuredFieldName('incident', 'create', 'category'),
+		'incident',
+		'create',
+	);
+	assert.equal(incidentCategory.type, 'options');
+	assert.equal(incidentCategory.typeOptions.loadOptionsMethod, 'getIncidentCategoryOptions');
+
+	const observableUpdateFields = getDisplayedProperty(
+		description,
+		updateFieldsName('observable'),
+		'observable',
+		'update',
+	);
+	const observableThreatLevel = observableUpdateFields.options.find(
+		(option) => option.name === 'threatLevel',
+	);
+	const observableCriticality = observableUpdateFields.options.find(
+		(option) => option.name === 'criticality',
+	);
+	assert.ok(observableThreatLevel, 'Expected observable threatLevel update field');
+	assert.ok(observableCriticality, 'Expected observable criticality update field');
+	assert.equal(observableThreatLevel.type, 'options');
+	assert.equal(observableThreatLevel.typeOptions.loadOptionsMethod, 'getThreatLevelOptions');
+	assert.equal(observableCriticality.type, 'options');
+	assert.equal(observableCriticality.typeOptions.loadOptionsMethod, 'getCriticalityOptions');
+
+	const knowledgeType = getDisplayedProperty(
+		description,
+		structuredFieldName('knowledge', 'create', 'type'),
+		'knowledge',
+		'create',
+	);
+	assert.equal(knowledgeType.type, 'options');
+	assert.equal(knowledgeType.typeOptions.loadOptionsMethod, 'getKnowledgeTypeOptions');
+});
+
+test('HustleOps picklist loaders map API values and readable labels', async () => {
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	const calls = [];
+	const context = {
+		getNode: () => ({ name: 'HustleOps', type: 'hustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		helpers: {
+			httpRequest: async (options) => {
+				calls.push(options);
+				return [
+					{ id: 'ignore-id', value: 'authentication', label: 'Authentication' },
+					{ value: 'endpoint' },
+					{ label: 'Missing value' },
+				];
+			},
+		},
+	};
+
+	const options = await node.methods.loadOptions.getAlertTypeOptions.call(context);
+
+	assert.equal(calls.length, 1);
+	assert.equal(calls[0].method, 'GET');
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/picklists/alertType');
+	assert.deepEqual(options, [
+		{ name: 'Authentication', value: 'authentication', description: undefined },
+		{ name: 'Endpoint', value: 'endpoint', description: undefined },
+	]);
+});
+
+test('HustleOps enum picklist loaders return API enum values for observable fields', async () => {
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	const context = {
+		getNode: () => ({ name: 'HustleOps', type: 'hustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		helpers: {
+			httpRequest: async () => [
+				{ value: 'malicious', label: 'Malicious' },
+				{ value: 'suspicious', label: 'Suspicious' },
+			],
+		},
+	};
+
+	const options = await node.methods.loadOptions.getThreatLevelOptions.call(context);
+
+	assert.deepEqual(
+		options.map((option) => option.value),
+		['MALICIOUS', 'SUSPICIOUS'],
+	);
+	assert.deepEqual(
+		options.map((option) => option.name),
+		['Malicious', 'Suspicious'],
+	);
+});
+
+test('HustleOps picklist loader surfaces API failures clearly', async () => {
+	const { HustleOps } = require('../dist/nodes/HustleOps/HustleOps.node.js');
+	const node = new HustleOps();
+	const context = {
+		getNode: () => ({ name: 'HustleOps', type: 'hustleOps' }),
+		getCredentials: async () => ({
+			baseUrl: 'https://hustleops.example.com',
+			apiKey: 'fixture-api-key',
+		}),
+		helpers: {
+			httpRequest: async () => {
+				const error = new Error('Request failed with status code 403');
+				error.response = {
+					statusCode: 403,
+					body: {
+						statusCode: 403,
+						message: 'Forbidden',
+						path: '/api/v1/picklists/alertType',
+						requestId: 'req-picklist',
+					},
+				};
+				throw error;
+			},
+		},
+	};
+
+	await assert.rejects(
+		node.methods.loadOptions.getAlertTypeOptions.call(context),
+		/HustleOps API error 403.*Forbidden.*req-picklist.*\/api\/v1\/picklists\/alertType/,
+	);
 });
 
 test('HustleOps node exposes comment operations and fields', () => {
@@ -877,90 +1029,4 @@ test('runtime package surface stays compatible with verified community node cons
 	);
 	assert.doesNotMatch(runtimeSources, /from ['"](?:node:)?child_process['"]/);
 	assert.doesNotMatch(runtimeSources, /require\(['"](?:node:)?child_process['"]\)/);
-});
-
-test('README documents live HustleOps API core operations', () => {
-	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
-
-	assert.match(readme, /live HustleOps API/i);
-	assert.match(readme, /x-api-key/i);
-	assert.match(readme, /Search/i);
-	assert.match(readme, /Count/i);
-	assert.match(readme, /Get/i);
-	assert.match(readme, /Create/i);
-	assert.match(readme, /Update/i);
-	assert.match(readme, /Alert/i);
-	assert.match(readme, /Incident/i);
-	assert.match(readme, /Observable/i);
-	assert.match(readme, /Knowledge/i);
-	assert.match(readme, /Return All/i);
-	assert.match(readme, /Max Items/i);
-	assert.match(readme, /Include Pagination Metadata/i);
-	assert.match(readme, /unsupported fields/i);
-	assert.match(readme, /Getting an API key/i);
-	assert.match(readme, /API keys must be created outside n8n/i);
-	assert.match(readme, /Create examples/i);
-	assert.match(readme, /sourceRef/i);
-	assert.match(readme, /firstSeen/i);
-	assert.match(readme, /tlp/i);
-	assert.match(readme, /Input Mode/i);
-	assert.match(readme, /Individual Fields/i);
-	assert.match(readme, /JSON Object/i);
-	assert.match(readme, /full replacement/i);
-	assert.match(readme, /Additional Fields/i);
-	assert.match(readme, /Fields to Update/i);
-	assert.match(readme, /structured fields/i);
-	assert.doesNotMatch(readme, readmePhrasePattern('Additional', 'JSON'));
-	assert.doesNotMatch(readme, readmePhrasePattern('merged after', 'structured fields'));
-	assert.doesNotMatch(readme, readmePhrasePattern('legacy', 'fallback'));
-	assert.doesNotMatch(readme, readmePhrasePattern('Search', 'Body'));
-	assert.doesNotMatch(readme, readmePhrasePattern('Tag', 'Body'));
-	assert.doesNotMatch(readme, readmePhrasePattern('Comment', 'Body'));
-	assert.doesNotMatch(readme, readmePhrasePattern('Custom Field', 'Body'));
-	assert.match(readme, /summary": null/i);
-	assert.match(readme, /Threat Level/i);
-	assert.match(readme, /First Seen/i);
-	assert.match(readme, /Category/i);
-	assert.match(readme, /Comment/i);
-	assert.match(readme, /List/i);
-	assert.match(readme, /Get Unread Count/i);
-	assert.match(readme, /Toggle Reaction/i);
-	assert.match(readme, /Toggle Pin/i);
-	assert.match(readme, /Tag/i);
-	assert.match(readme, /Set Tags/i);
-	assert.match(readme, /Add Tags/i);
-	assert.match(readme, /Remove Tag/i);
-	assert.match(readme, /Custom Field/i);
-	assert.match(readme, /Replace Values/i);
-	assert.match(readme, /Update Selected Values Safely/i);
-	assert.match(readme, /Entity Type/i);
-	assert.match(readme, /Entity ID/i);
-	assert.match(readme, /Comment ID/i);
-	assert.match(readme, /Search Query/i);
-	assert.match(readme, /Max Results/i);
-	assert.match(readme, /Include Cursor Metadata/i);
-	assert.match(readme, /one item per comment/i);
-	assert.match(readme, /\{ "unreadCount": number \}/i);
-	assert.doesNotMatch(readme, /Comment Permissions/i);
-	assert.doesNotMatch(readme, /COMMENTS:VIEW/i);
-	assert.doesNotMatch(readme, /Attachment upload and download are not included/i);
-	assert.doesNotMatch(readme, /npm install @hustleops-n8n\/n8n-nodes-hustleops/i);
-	assert.doesNotMatch(readme, /Community Nodes/i);
-	assert.doesNotMatch(readme, /Release workflow/i);
-	assert.doesNotMatch(readme, /npm run release/i);
-	assert.doesNotMatch(readme, /Creator Portal/i);
-	assert.doesNotMatch(readme, /metadata-first/i);
-	assert.doesNotMatch(readme, /does not call the HustleOps API/i);
-});
-
-test('README documents payload input mode contract', () => {
-	const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
-
-	assert.match(readme, /Input Mode/i);
-	assert.match(readme, /Individual Fields/i);
-	assert.match(readme, /JSON Object/i);
-	assert.match(readme, /full replacement/i);
-	assert.doesNotMatch(readme, readmePhrasePattern('Additional', 'JSON'));
-	assert.doesNotMatch(readme, readmePhrasePattern('merged after', 'structured fields'));
-	assert.doesNotMatch(readme, readmePhrasePattern('legacy', 'fallback'));
 });

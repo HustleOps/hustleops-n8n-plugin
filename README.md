@@ -21,7 +21,9 @@ Payload operations expose an **Input Mode** selector.
 - **Individual Fields** is the default. The node builds the request body from visible fields and validates the body before it reads credentials or calls HustleOps.
 - **JSON Object** submits the JSON object as the complete request body. JSON Object mode is full replacement: values left in hidden Individual Fields controls are ignored.
 
-Search and Count operations can be built from individual search fields or from a complete JSON SearchRequest object. Create and Update operations expose supported DTO fields in Individual Fields mode and a complete JSON Object body in JSON Object mode.
+Structured enum fields render as dropdowns. Picklist-backed fields such as alert type/status, incident status/category, observable type/threat level/criticality, and knowledge type load their dropdown options from HustleOps `/picklists/:domain` endpoints and send the selected API value in the create or update payload.
+
+Use `Additional JSON` only for advanced supported fields or intentional overrides. `Additional JSON` is merged after structured fields, so duplicate keys in `Additional JSON` win. Unsupported fields still fail before the API request is sent.
 
 Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
 

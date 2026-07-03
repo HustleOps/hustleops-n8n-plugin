@@ -115,7 +115,65 @@ test('update builds structured body and patches the resource detail endpoint', a
 	});
 });
 
-test('core create JSON object mode submits the JSON object as the full body', async () => {
+test('selected picklist dropdown values are sent unchanged in structured payloads', async () => {
+	const { calls } = await execute(
+		[
+			{
+				resource: 'alert',
+				operation: 'create',
+				[structuredFieldName('alert', 'create', 'name')]: 'Suspicious login',
+				[structuredFieldName('alert', 'create', 'description')]: 'Okta anomaly',
+				[structuredFieldName('alert', 'create', 'severity')]: 'HIGH',
+				[structuredFieldName('alert', 'create', 'tlp')]: 'AMBER',
+				[structuredFieldName('alert', 'create', 'source')]: 'okta',
+				[structuredFieldName('alert', 'create', 'type')]: 'authentication',
+				[structuredFieldName('alert', 'create', 'sourceRef')]: 'evt_12345',
+				[structuredFieldName('alert', 'create', 'detectedAt')]: '2026-06-28T12:00:00.000Z',
+				[createAdditionalFieldsName('alert')]: {
+					status: 'triage',
+				},
+			},
+		],
+		() => ({ id: 'alert-id-1', displayId: 'ALT-1' }),
+	);
+
+	assert.deepEqual(calls[0].body, {
+		name: 'Suspicious login',
+		description: 'Okta anomaly',
+		severity: 'HIGH',
+		tlp: 'AMBER',
+		source: 'okta',
+		type: 'authentication',
+		sourceRef: 'evt_12345',
+		detectedAt: '2026-06-28T12:00:00.000Z',
+		status: 'triage',
+	});
+});
+
+test('observable enum picklist selections are sent as API enum values', async () => {
+	const observableId = '22222222-2222-4222-8222-222222222222';
+	const { calls } = await execute(
+		[
+			{
+				resource: 'observable',
+				operation: 'update',
+				id: observableId,
+				[updateFieldsName('observable')]: {
+					threatLevel: 'SUSPICIOUS',
+					criticality: 'LOW',
+				},
+			},
+		],
+		() => ({ id: observableId, threatLevel: 'SUSPICIOUS', criticality: 'LOW' }),
+	);
+
+	assert.deepEqual(calls[0].body, {
+		threatLevel: 'SUSPICIOUS',
+		criticality: 'LOW',
+	});
+});
+
+test('additional JSON merges after structured create fields and overrides duplicate keys', async () => {
 	const { calls } = await execute(
 		[
 			{
