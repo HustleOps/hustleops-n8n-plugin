@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.4 - 2026-07-03
+
+### Features
+
+- add picklist dropdowns for structured fields
+
+### Tests
+
+- remove README contract assertions
+
 ## v0.1.3 - 2026-07-03
 
 ### Fixes
