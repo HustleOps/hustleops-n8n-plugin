@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.1.3 - 2026-07-03
+
+### Fixes
+
+- surface HTTP response data in HustleOps errors
+
+### Documentation
+
+- trim README tail
+- document one-run release workflow
+- align release docs with npm publishing
+
+### Tests
+
+- remove brittle README spacing assertions
+- cover release file generation (`ci`)
+- expect one-run release workflow (`ci`)
+
+### CI
+
+- use release app token
+- require release bypass token
+- finalize one-run release workflow
+- run release preparation in release workflow
+
 ## v0.1.2 - 2026-07-03
 
 ### Features
