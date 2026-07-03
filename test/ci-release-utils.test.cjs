@@ -69,6 +69,48 @@ function createGitPackageFixture(
 	return directory;
 }
 
+function createMergedReleaseFixture() {
+	const directory = createGitPackageFixture('0.1.1', {
+		changelog: '# Changelog\n',
+		subject: 'feat: create release fixture',
+	});
+	const baseBranch = childProcess
+		.execFileSync('git', ['branch', '--show-current'], { cwd: directory, encoding: 'utf8' })
+		.trim();
+
+	childProcess.execFileSync('git', ['checkout', '-b', 'release-v0.1.2'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	updatePackageVersion(directory, '0.1.2');
+	fs.writeFileSync(
+		path.join(directory, 'CHANGELOG.md'),
+		'# Changelog\n\n## v0.1.2 - 2026-07-03\n\n- Prepared release.\n',
+	);
+	childProcess.execFileSync('git', ['add', 'package.json', 'package-lock.json', 'CHANGELOG.md'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['commit', '-m', 'chore(release): v0.1.2'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['checkout', baseBranch], { cwd: directory, stdio: 'ignore' });
+	childProcess.execFileSync(
+		'git',
+		[
+			'merge',
+			'--no-ff',
+			'release-v0.1.2',
+			'-m',
+			'Merge pull request #4 from HustleOps/codex/release-v0.1.2',
+		],
+		{ cwd: directory, stdio: 'ignore' },
+	);
+
+	return directory;
+}
+
 function runReleasePrepare(directory, args) {
 	return childProcess.execFileSync(
 		process.execPath,
@@ -174,6 +216,14 @@ test('release prepare require-prepared accepts matching release commit', () => {
 		changelog: '# Changelog\n\n## v0.1.2 - 2026-07-03\n\n- Prepared release.\n',
 		subject: 'chore(release): v0.1.2',
 	});
+
+	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']);
+
+	assert.match(output, /Release files are already prepared for v0\.1\.2/);
+});
+
+test('release prepare require-prepared accepts release commit merged through pull request', () => {
+	const directory = createMergedReleaseFixture();
 
 	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']);
 
