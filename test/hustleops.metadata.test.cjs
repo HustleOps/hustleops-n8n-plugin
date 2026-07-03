@@ -780,10 +780,7 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 		/release-prepare\.cjs --release-tag "\$RELEASE_TAG"\n/,
 	);
 	assert.doesNotMatch(releaseWorkflow.slice(preflightIndex, prepareIndex), /--require-prepared/);
-	assert.match(
-		releaseWorkflow,
-		/release-prepare\.cjs --release-tag "\$RELEASE_TAG" --write/,
-	);
+	assert.match(releaseWorkflow, /release-prepare\.cjs --release-tag "\$RELEASE_TAG" --write/);
 	assert.match(releaseWorkflow, /release_already_prepared/);
 	assert.match(releaseWorkflow, /git diff --name-only/);
 	assert.match(releaseWorkflow, /CHANGELOG\.md\|package\.json\|package-lock\.json/);
