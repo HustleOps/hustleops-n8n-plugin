@@ -58,12 +58,12 @@ jobs:
       - name: Validate checked-out main
         run: |
           set -euo pipefail
-          git fetch origin main --tags
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 
       - name: Release preflight
         id: preflight
-        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --require-prepared
+        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG"
 
       - name: Check npm version availability
         id: npm_version
@@ -92,6 +92,30 @@ jobs:
           fi
           echo "published=false" >> "$GITHUB_OUTPUT"
 
+      - name: Prepare release files
+        run: node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --write
+
+      - name: Validate generated release diff
+        id: release_diff
+        run: |
+          set -euo pipefail
+          CHANGED_FILES="$(git diff --name-only)"
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          for file in $CHANGED_FILES; do
+            case "$file" in
+              CHANGELOG.md|package.json|package-lock.json) ;;
+              *)
+                echo "::error::Unexpected release file change: $file"
+                exit 1
+                ;;
+            esac
+          done
+          git diff --check -- CHANGELOG.md package.json package-lock.json
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
       - name: Run pre-release quality gate
         run: |
           npm run format:check
@@ -100,10 +124,31 @@ jobs:
           npm test
           npm pack --dry-run
 
+      - name: Commit and push release files
+        if: steps.release_diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          BASE_SHA="$(git rev-parse HEAD)"
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
+          test "$BASE_SHA" = "$(git rev-parse origin/main)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md package.json package-lock.json
+          git commit -m "chore(release): $RELEASE_TAG"
+          git push origin HEAD:main
+
+      - name: Verify prepared release state
+        run: |
+          set -euo pipefail
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --require-prepared
+
       - name: Create and push release tag
         run: |
           set -euo pipefail
-          git fetch origin --tags
+          git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           if git rev-parse --verify "$RELEASE_TAG" >/dev/null 2>&1; then
             test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
           else
