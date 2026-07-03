@@ -88,6 +88,8 @@ function assertPreparedReleaseState(rootDirectory, releaseTag) {
 function main() {
 	const releaseTag = readArg('--release-tag') ?? process.env.RELEASE_TAG;
 	const write = hasFlag('--write');
+	const requirePrepared =
+		hasFlag('--require-prepared') || process.env.RELEASE_REQUIRE_PREPARED === 'true';
 	const rootDirectory = process.cwd();
 	const requested = parseReleaseTag(releaseTag);
 	const currentVersion = assertPackageVersionsAgree(rootDirectory);
@@ -96,6 +98,11 @@ function main() {
 	if (compareSemver(requested.version, currentVersion) < 0) {
 		throw new Error(
 			`requested version ${requested.version} must be greater than current version ${currentVersion}`,
+		);
+	}
+	if (requirePrepared && !preparedRelease) {
+		throw new Error(
+			`release files must be prepared through a pull request before publishing ${releaseTag}`,
 		);
 	}
 

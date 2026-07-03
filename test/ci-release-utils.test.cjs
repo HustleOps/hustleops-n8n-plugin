@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -38,6 +39,42 @@ function createPackageFixture(version, lockVersion = version, rootLockVersion = 
 		)}\n`,
 	);
 	return directory;
+}
+
+function createGitPackageFixture(
+	version,
+	{
+		changelog = '',
+		subject = 'feat: create release fixture',
+		lockVersion = version,
+		rootLockVersion = lockVersion,
+	} = {},
+) {
+	const directory = createPackageFixture(version, lockVersion, rootLockVersion);
+	fs.writeFileSync(path.join(directory, 'CHANGELOG.md'), changelog);
+	childProcess.execFileSync('git', ['init'], { cwd: directory, stdio: 'ignore' });
+	childProcess.execFileSync('git', ['config', 'user.name', 'Test User'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['add', 'package.json', 'package-lock.json', 'CHANGELOG.md'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['commit', '-m', subject], { cwd: directory, stdio: 'ignore' });
+	return directory;
+}
+
+function runReleasePrepare(directory, args) {
+	return childProcess.execFileSync(
+		process.execPath,
+		[path.join(__dirname, '..', 'scripts', 'ci', 'release-prepare.cjs'), ...args],
+		{ cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+	);
 }
 
 test('parseReleaseTag accepts stable v-prefixed semver tags', () => {
@@ -115,4 +152,30 @@ test('generateChangelog creates a release entry from conventional commits', () =
 	assert.match(changelog, /- correct package registry/);
 	assert.match(changelog, /### Documentation/);
 	assert.doesNotMatch(changelog, /chore\(release\): v0.1.2/);
+});
+
+test('release prepare require-prepared rejects unprepared release files', () => {
+	const directory = createGitPackageFixture('0.1.1');
+
+	assert.throws(
+		() => runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']),
+		(error) => {
+			assert.match(
+				String(error.stderr),
+				/release files must be prepared through a pull request before publishing v0\.1\.2/,
+			);
+			return true;
+		},
+	);
+});
+
+test('release prepare require-prepared accepts matching release commit', () => {
+	const directory = createGitPackageFixture('0.1.2', {
+		changelog: '# Changelog\n\n## v0.1.2 - 2026-07-03\n\n- Prepared release.\n',
+		subject: 'chore(release): v0.1.2',
+	});
+
+	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']);
+
+	assert.match(output, /Release files are already prepared for v0\.1\.2/);
 });
