@@ -14,6 +14,17 @@ const {
 	updatePackageVersion,
 } = require('./release-utils.cjs');
 
+const PACKAGE_IMPACTING_PATHS = [
+	'CHANGELOG.md',
+	'LICENSE',
+	'README.md',
+	'credentials',
+	'dist',
+	'nodes',
+	'package-lock.json',
+	'package.json',
+];
+
 function readArg(name) {
 	const index = process.argv.indexOf(name);
 	return index === -1 ? null : process.argv[index + 1];
@@ -66,32 +77,51 @@ function tagPointsToHead(tag) {
 	return tagSha === runGit(['rev-parse', 'HEAD']);
 }
 
-function hasPreparedReleaseCommit(releaseTag) {
+function findPreparedReleaseCommit(releaseTag) {
 	const releaseSubject = `chore(release): ${releaseTag}`;
-	const headSubject = runGit(['log', '-1', '--format=%s']);
+	const commits = runGit(['log', '--format=%H%x00%s']);
 
-	if (headSubject === releaseSubject) {
-		return true;
-	}
+	for (const commit of commits.split(/\r?\n/)) {
+		const separatorIndex = commit.indexOf('\0');
+		if (separatorIndex === -1) {
+			continue;
+		}
 
-	const revision = tryRunGit(['rev-list', '--parents', '-n', '1', 'HEAD']);
-	const parents = revision ? revision.split(/\s+/).slice(1) : [];
-	for (const parent of parents) {
-		if (tryRunGit(['log', '-1', '--format=%s', parent]) === releaseSubject) {
-			return true;
+		const sha = commit.slice(0, separatorIndex);
+		const subject = commit.slice(separatorIndex + 1);
+		if (subject === releaseSubject) {
+			return sha;
 		}
 	}
 
-	return false;
+	return null;
+}
+
+function getPackageImpactingChangesSince(commit) {
+	const output = tryRunGit([
+		'diff',
+		'--name-only',
+		`${commit}..HEAD`,
+		'--',
+		...PACKAGE_IMPACTING_PATHS,
+	]);
+	return output ? output.split(/\r?\n/).filter(Boolean) : [];
 }
 
 function assertPreparedReleaseState(rootDirectory, releaseTag) {
 	const changelogPath = path.join(rootDirectory, 'CHANGELOG.md');
 	const changelog = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
+	const releaseCommit = findPreparedReleaseCommit(releaseTag);
 
-	if (!hasPreparedReleaseCommit(releaseTag)) {
+	if (!releaseCommit) {
 		throw new Error(
 			`current version already matches ${releaseTag}, but HEAD is not the release commit`,
+		);
+	}
+	const packageChanges = getPackageImpactingChangesSince(releaseCommit);
+	if (packageChanges.length > 0) {
+		throw new Error(
+			`current version already matches ${releaseTag}, but package-impacting files changed after the release commit:\n- ${packageChanges.join('\n- ')}`,
 		);
 	}
 	if (

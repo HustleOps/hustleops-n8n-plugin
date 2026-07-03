@@ -111,6 +111,36 @@ function createMergedReleaseFixture() {
 	return directory;
 }
 
+function mergePostReleaseChange(directory, { branch, subject, mergeSubject, files }) {
+	const baseBranch = childProcess
+		.execFileSync('git', ['branch', '--show-current'], { cwd: directory, encoding: 'utf8' })
+		.trim();
+	childProcess.execFileSync('git', ['checkout', '-b', branch], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+
+	for (const [relativePath, contents] of Object.entries(files)) {
+		const filePath = path.join(directory, relativePath);
+		fs.mkdirSync(path.dirname(filePath), { recursive: true });
+		fs.writeFileSync(filePath, contents);
+	}
+
+	childProcess.execFileSync('git', ['add', ...Object.keys(files)], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['commit', '-m', subject], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+	childProcess.execFileSync('git', ['checkout', baseBranch], { cwd: directory, stdio: 'ignore' });
+	childProcess.execFileSync('git', ['merge', '--no-ff', branch, '-m', mergeSubject], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+}
+
 function runReleasePrepare(directory, args) {
 	return childProcess.execFileSync(
 		process.execPath,
@@ -220,6 +250,47 @@ test('release prepare require-prepared accepts matching release commit', () => {
 	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']);
 
 	assert.match(output, /Release files are already prepared for v0\.1\.2/);
+});
+
+test('release prepare require-prepared accepts non-package CI fixes after release commit', () => {
+	const directory = createMergedReleaseFixture();
+	mergePostReleaseChange(directory, {
+		branch: 'release-ci-fix',
+		subject: 'ci: update release preflight',
+		mergeSubject: 'Merge pull request #5 from HustleOps/codex/fix-release-merge-preflight',
+		files: {
+			'.github/workflows/release.yml': 'name: Release\n',
+		},
+	});
+
+	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']);
+
+	assert.match(output, /Release files are already prepared for v0\.1\.2/);
+});
+
+test('release prepare require-prepared rejects package changes after release commit', () => {
+	const directory = createMergedReleaseFixture();
+	const packageJson = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+	packageJson.description = 'Changed after release prep';
+	mergePostReleaseChange(directory, {
+		branch: 'package-change',
+		subject: 'docs: update package metadata',
+		mergeSubject: 'Merge pull request #6 from HustleOps/codex/package-change',
+		files: {
+			'package.json': `${JSON.stringify(packageJson, null, '\t')}\n`,
+		},
+	});
+
+	assert.throws(
+		() => runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']),
+		(error) => {
+			assert.match(
+				String(error.stderr),
+				/current version already matches v0\.1\.2, but package-impacting files changed after the release commit:\n- package\.json/,
+			);
+			return true;
+		},
+	);
 });
 
 test('release prepare require-prepared accepts release commit merged through pull request', () => {
