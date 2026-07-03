@@ -66,12 +66,30 @@ function tagPointsToHead(tag) {
 	return tagSha === runGit(['rev-parse', 'HEAD']);
 }
 
+function hasPreparedReleaseCommit(releaseTag) {
+	const releaseSubject = `chore(release): ${releaseTag}`;
+	const headSubject = runGit(['log', '-1', '--format=%s']);
+
+	if (headSubject === releaseSubject) {
+		return true;
+	}
+
+	const revision = tryRunGit(['rev-list', '--parents', '-n', '1', 'HEAD']);
+	const parents = revision ? revision.split(/\s+/).slice(1) : [];
+	for (const parent of parents) {
+		if (tryRunGit(['log', '-1', '--format=%s', parent]) === releaseSubject) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 function assertPreparedReleaseState(rootDirectory, releaseTag) {
 	const changelogPath = path.join(rootDirectory, 'CHANGELOG.md');
 	const changelog = fs.existsSync(changelogPath) ? fs.readFileSync(changelogPath, 'utf8') : '';
-	const headSubject = runGit(['log', '-1', '--format=%s']);
 
-	if (headSubject !== `chore(release): ${releaseTag}`) {
+	if (!hasPreparedReleaseCommit(releaseTag)) {
 		throw new Error(
 			`current version already matches ${releaseTag}, but HEAD is not the release commit`,
 		);
