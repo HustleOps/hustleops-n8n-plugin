@@ -18,18 +18,18 @@ function createPackageFixture(version, lockVersion = version, rootLockVersion = 
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hustleops-release-utils-'));
 	fs.writeFileSync(
 		path.join(directory, 'package.json'),
-		`${JSON.stringify({ name: '@hustleops-n8n/n8n-nodes-hustleops', version }, null, '\t')}\n`,
+		`${JSON.stringify({ name: '@hustleops/n8n-nodes-hustleops', version }, null, '\t')}\n`,
 	);
 	fs.writeFileSync(
 		path.join(directory, 'package-lock.json'),
 		`${JSON.stringify(
 			{
-				name: '@hustleops-n8n/n8n-nodes-hustleops',
+				name: '@hustleops/n8n-nodes-hustleops',
 				version: lockVersion,
 				lockfileVersion: 3,
 				packages: {
 					'': {
-						name: '@hustleops-n8n/n8n-nodes-hustleops',
+						name: '@hustleops/n8n-nodes-hustleops',
 						version: rootLockVersion,
 					},
 				},
