@@ -793,7 +793,7 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 test('HustleOps node codex metadata is present', () => {
 	const codex = require('../dist/nodes/HustleOps/HustleOps.node.json');
 
-	assert.equal(codex.node, '@hustleops-n8n/n8n-nodes-hustleops');
+	assert.equal(codex.node, '@hustleops/n8n-nodes-hustleops');
 	assert.equal(codex.nodeVersion, '1.0');
 	assert.equal(codex.codexVersion, '1.0');
 	assert.equal(codex.categories.includes('Development'), true);
@@ -803,7 +803,7 @@ test('HustleOps node codex metadata is present', () => {
 test('package.json registers the compiled HustleOps node and credentials', () => {
 	const packageJson = require('../package.json');
 
-	assert.equal(packageJson.name, '@hustleops-n8n/n8n-nodes-hustleops');
+	assert.equal(packageJson.name, '@hustleops/n8n-nodes-hustleops');
 	assert.equal(packageJson.private, undefined);
 	assert.equal(packageJson.license, 'MIT');
 	assert.deepEqual(packageJson.author, {

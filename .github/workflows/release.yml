@@ -23,7 +23,7 @@ jobs:
 
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
-      PACKAGE_NAME: '@hustleops-n8n/n8n-nodes-hustleops'
+      PACKAGE_NAME: '@hustleops/n8n-nodes-hustleops'
       NPM_CONFIG_PROVENANCE: 'true'
 
     steps:
