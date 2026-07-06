@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.5 - 2026-07-06
+
+### CI
+
+- refresh PR validation
+
 ## v0.1.4 - 2026-07-03
 
 ### Features
