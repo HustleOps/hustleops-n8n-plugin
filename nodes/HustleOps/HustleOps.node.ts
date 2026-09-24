@@ -608,14 +608,18 @@ function buildStructuredDtoBody(
 			if (!Object.prototype.hasOwnProperty.call(fieldsToUpdate, field)) {
 				continue;
 			}
+			const value = fieldsToUpdate[field];
+			const preserveEmptyString =
+				value === '' &&
+				(field === 'summary' || (definition.resource === 'knowledge' && field === 'description'));
 			assignStructuredField(
 				context,
 				structuredBody,
 				structuredFields,
 				definition,
 				field,
-				fieldsToUpdate[field],
-				false,
+				value,
+				!preserveEmptyString,
 				itemIndex,
 			);
 		}
