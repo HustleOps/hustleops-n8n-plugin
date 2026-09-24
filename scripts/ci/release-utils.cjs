@@ -17,6 +17,7 @@ const CHANGELOG_SECTIONS = new Map([
 	['ci', 'CI'],
 	['style', 'Style'],
 	['chore', 'Chores'],
+	['revert', 'Reverts'],
 ]);
 
 function parseVersion(version) {
@@ -151,7 +152,7 @@ function updatePackageVersion(rootDirectory, version) {
 
 function parseConventionalSubject(subject) {
 	const match =
-		/^(?:revert: )?(?<type>build|chore|ci|docs|feat|fix|perf|refactor|style|test)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?: (?<description>.+)$/.exec(
+		/^(?<revert>revert: )?(?<type>build|chore|ci|docs|feat|fix|perf|refactor|style|test)(?:\((?<scope>[^)]+)\))?(?<breaking>!)?: (?<description>.+)$/.exec(
 			subject,
 		);
 	return match?.groups ?? null;
@@ -159,7 +160,7 @@ function parseConventionalSubject(subject) {
 
 function formatChangelogLine(groups) {
 	const suffix = groups.scope ? ` (\`${groups.scope}\`)` : '';
-	const prefix = groups.breaking ? '**Breaking:** ' : '';
+	const prefix = groups.revert ? 'Reverted: ' : groups.breaking ? '**Breaking:** ' : '';
 	return `- ${prefix}${groups.description}${suffix}`;
 }
 
@@ -172,7 +173,7 @@ function generateChangelog(existingChangelog, releaseTag, releaseDate, subjects)
 			continue;
 		}
 
-		const section = CHANGELOG_SECTIONS.get(groups.type);
+		const section = CHANGELOG_SECTIONS.get(groups.revert ? 'revert' : groups.type);
 		if (!section) {
 			continue;
 		}
