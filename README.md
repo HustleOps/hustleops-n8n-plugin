@@ -70,7 +70,7 @@ Value operations use uppercase entity types: `ALERT`, `INCIDENT`, `OBSERVABLE`, 
 - `Get Available`: calls `GET /custom-fields/available/:entityType/:entityId`.
 - `Batch Get Values`: calls `POST /custom-fields/values/batch` with `{ "entityType": "ALERT", "entityIds": [...] }` and allows up to 100 IDs.
 - `Replace Values`: calls `PATCH /custom-fields/values/:entityType/:entityId` with the exact attached field set to keep.
-- `Update Selected Values Safely`: first reads existing values, merges selected field changes, then patches the complete attached field set so omitted attached fields are preserved.
+- `Update Selected Values Safely`: first reads existing values, merges selected field changes, then patches the complete attached field set so omitted attached fields are preserved. Concurrent updates to the same entity can overwrite one another.
 
 Custom field write operations support **Input Mode**. In **Individual Fields** mode, use the visible group, definition, definition ID, entity ID list, or attached field row controls for the selected operation. In **JSON Object** mode, submit the complete payload, for example:
 
@@ -205,7 +205,7 @@ Update operations keep `ID` as a required field and put editable payload values 
 
 For example, updating an Observable can set `Threat Level`, `Criticality`, and `Version` under `Fields to Update`.
 
-To submit a complete update body or clear a supported nullable field, use **JSON Object** mode, such as `{ "summary": null }`. Blank Individual Fields update values are omitted.
+To submit a complete update body or clear a supported nullable field, use **JSON Object** mode, such as `{ "summary": null }`. Blank Individual Fields update values are omitted, except Alert and Incident `Summary` and Knowledge `Description`, which accept an empty string to clear them.
 
 ## Search Pagination
 
