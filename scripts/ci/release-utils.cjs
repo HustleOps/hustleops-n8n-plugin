@@ -159,7 +159,7 @@ function parseConventionalSubject(subject) {
 
 function formatChangelogLine(groups) {
 	const suffix = groups.scope ? ` (\`${groups.scope}\`)` : '';
-	const prefix = groups.revert ? 'Reverted: ' : groups.breaking ? '**Breaking:** ' : '';
+	const prefix = `${groups.breaking ? '**Breaking:** ' : ''}${groups.revert ? 'Reverted: ' : ''}`;
 	return `- ${prefix}${groups.description}${suffix}`;
 }
 
