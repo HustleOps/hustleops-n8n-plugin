@@ -23,6 +23,7 @@ const PACKAGE_IMPACTING_PATHS = [
 	'nodes',
 	'package-lock.json',
 	'package.json',
+	'tsconfig.json',
 ];
 
 function readArg(name) {
