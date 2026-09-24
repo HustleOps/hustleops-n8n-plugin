@@ -605,6 +605,9 @@ function buildStructuredDtoBody(
 			itemIndex,
 		);
 		for (const field of definition.updateFields) {
+			if (!Object.prototype.hasOwnProperty.call(fieldsToUpdate, field)) {
+				continue;
+			}
 			assignStructuredField(
 				context,
 				structuredBody,
@@ -612,7 +615,7 @@ function buildStructuredDtoBody(
 				definition,
 				field,
 				fieldsToUpdate[field],
-				true,
+				false,
 				itemIndex,
 			);
 		}
