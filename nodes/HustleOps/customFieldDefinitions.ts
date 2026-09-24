@@ -657,25 +657,47 @@ export function customFieldBatchBody(
 export function extractAttachedCustomFieldValues(
 	value: unknown,
 ): Array<{ fieldId: string; value: string | null }> {
-	const container = value as IDataObject;
-	const rows = Array.isArray(value)
-		? value
-		: Array.isArray(container?.values)
-			? container.values
-			: Array.isArray(container?.data)
-				? container.data
-				: [];
+	const container =
+		value && typeof value === 'object' && !Array.isArray(value) ? (value as IDataObject) : null;
+	let rows: unknown = value;
+	if (!Array.isArray(value) && container && ('groups' in container || 'ungrouped' in container)) {
+		if (!Array.isArray(container.groups) || !Array.isArray(container.ungrouped)) {
+			throw new Error('Custom field values response has invalid groups.');
+		}
+		rows = [
+			...container.ungrouped,
+			...container.groups.flatMap((group) => {
+				if (!group || typeof group !== 'object' || !Array.isArray(group.fields)) {
+					throw new Error('Custom field values response has an invalid group.');
+				}
+				return group.fields;
+			}),
+		];
+	} else if (!Array.isArray(value)) {
+		rows = container?.values ?? container?.data;
+	}
+	if (!Array.isArray(rows)) {
+		throw new Error('Custom field values response must contain attached values.');
+	}
 
-	return rows
-		.filter((row): row is IDataObject => !!row && typeof row === 'object' && !Array.isArray(row))
-		.filter(
-			(row) =>
-				typeof row.fieldId === 'string' && Object.prototype.hasOwnProperty.call(row, 'value'),
-		)
-		.map((row) => ({
-			fieldId: row.fieldId as string,
-			value: row.value === null ? null : String(row.value),
-		}));
+	const fieldIds = new Set<string>();
+	return rows.map((row, index) => {
+		if (
+			!row ||
+			typeof row !== 'object' ||
+			Array.isArray(row) ||
+			typeof row.fieldId !== 'string' ||
+			row.fieldId === '' ||
+			(typeof row.value !== 'string' && row.value !== null) ||
+			fieldIds.has(row.fieldId)
+		) {
+			throw new Error(
+				`Custom field values response has an invalid attached value at index ${index}.`,
+			);
+		}
+		fieldIds.add(row.fieldId);
+		return { fieldId: row.fieldId, value: row.value };
+	});
 }
 
 export function mergeCustomFieldValues(
