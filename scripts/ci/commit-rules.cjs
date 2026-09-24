@@ -30,6 +30,9 @@ function validateSubjects(subjects) {
 }
 
 function assertValidSubjects(subjects, label) {
+	if (subjects.every(isIgnoredSubject)) {
+		throw new Error('Commit subject list must not be empty.');
+	}
 	const invalidSubjects = validateSubjects(subjects);
 	if (invalidSubjects.length === 0) {
 		return;
