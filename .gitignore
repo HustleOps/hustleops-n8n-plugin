@@ -10,3 +10,4 @@ docs/
 .env
 .env.*
 .n8n/
+.bug-hunter/
