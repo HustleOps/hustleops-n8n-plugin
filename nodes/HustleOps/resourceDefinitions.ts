@@ -712,28 +712,40 @@ export function buildGenericSearchRequest(
 	input: IDataObject,
 ): IDataObject {
 	assertAllowedKeys(definition, 'search request', input, SEARCH_REQUEST_FIELDS);
-	const pagination = (input.pagination ?? {}) as IDataObject;
+	const paginationInput = input.pagination ?? {};
+	if (typeof paginationInput !== 'object' || Array.isArray(paginationInput)) {
+		throw new Error(`${definition.displayName} search pagination must be an object.`);
+	}
+	const pagination = paginationInput as IDataObject;
 	assertAllowedKeys(definition, 'search pagination', pagination, SEARCH_PAGINATION_FIELDS);
 	const sortBy =
-		typeof pagination.sortBy === 'string' && pagination.sortBy !== ''
-			? pagination.sortBy
-			: definition.defaultSortBy;
+		pagination.sortBy === undefined || pagination.sortBy === ''
+			? definition.defaultSortBy
+			: pagination.sortBy;
 	const sortOrder =
-		pagination.sortOrder === 'asc' || pagination.sortOrder === 'desc'
-			? pagination.sortOrder
-			: definition.defaultSortOrder;
+		pagination.sortOrder === undefined || pagination.sortOrder === ''
+			? definition.defaultSortOrder
+			: pagination.sortOrder;
 
-	if (!definition.sortFields.includes(sortBy)) {
+	if (typeof sortBy !== 'string' || !definition.sortFields.includes(sortBy)) {
 		throw new Error(`Unsupported ${definition.displayName} search sort field: ${sortBy}`);
 	}
-	const page = typeof pagination.page === 'number' ? pagination.page : 1;
-	const pageSize = typeof pagination.pageSize === 'number' ? pagination.pageSize : 25;
-	if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {
+	if (sortOrder !== 'asc' && sortOrder !== 'desc') {
+		throw new Error(`${definition.displayName} search pagination.sortOrder must be asc or desc.`);
+	}
+	const page = pagination.page === undefined ? 1 : pagination.page;
+	const pageSize = pagination.pageSize === undefined ? 25 : pagination.pageSize;
+	if (typeof page !== 'number' || !Number.isInteger(page) || page < 1 || page > MAX_PAGE) {
 		throw new Error(
 			`${definition.displayName} search pagination.page must be between 1 and ${MAX_PAGE}.`,
 		);
 	}
-	if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
+	if (
+		typeof pageSize !== 'number' ||
+		!Number.isInteger(pageSize) ||
+		pageSize < 1 ||
+		pageSize > MAX_PAGE_SIZE
+	) {
 		throw new Error(
 			`${definition.displayName} search pagination.pageSize must be between 1 and ${MAX_PAGE_SIZE}.`,
 		);
