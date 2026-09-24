@@ -25,27 +25,26 @@ function parseVersion(version) {
 	if (!match) {
 		throw new Error(`version must match X.Y.Z: ${version}`);
 	}
+	const [major, minor, patch] = match.slice(1).map(Number);
+	if (![major, minor, patch].every(Number.isSafeInteger)) {
+		throw new Error(`version components must be safe integers: ${version}`);
+	}
 
 	return {
-		major: Number(match[1]),
-		minor: Number(match[2]),
-		patch: Number(match[3]),
-		version: `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`,
+		major,
+		minor,
+		patch,
+		version: `${major}.${minor}.${patch}`,
 	};
 }
 
 function parseReleaseTag(tag) {
-	const match = RELEASE_TAG_PATTERN.exec(String(tag ?? '').trim());
-	if (!match) {
+	const normalizedTag = String(tag ?? '').trim();
+	if (!RELEASE_TAG_PATTERN.test(normalizedTag)) {
 		throw new Error(`release_tag must match vX.Y.Z: ${tag}`);
 	}
 
-	return {
-		major: Number(match[1]),
-		minor: Number(match[2]),
-		patch: Number(match[3]),
-		version: `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`,
-	};
+	return parseVersion(normalizedTag.slice(1));
 }
 
 function normalizeTag(tag) {
