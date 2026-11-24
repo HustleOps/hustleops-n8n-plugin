@@ -15,6 +15,7 @@ const {
 } = require('./release-utils.cjs');
 
 const PACKAGE_IMPACTING_PATHS = [
+	'.npmignore',
 	'CHANGELOG.md',
 	'LICENSE',
 	'README.md',
@@ -69,12 +70,18 @@ function assertTagDoesNotExist(tag) {
 	}
 }
 
-function tagPointsToHead(tag) {
-	const tagSha = tryRunGit(['rev-list', '-n', '1', tag]);
-	if (!tagSha) {
-		return false;
+function assertPreparedReleaseTag(releaseTag, releaseCommit) {
+	const tagRef = `refs/tags/${releaseTag}`;
+	if (!tryRunGit(['show-ref', '--hash', '--verify', tagRef])) return;
+
+	const tagCommit = runGit(['rev-parse', '--verify', `${tagRef}^{commit}`]);
+	if (
+		tryRunGit(['merge-base', '--is-ancestor', releaseCommit, tagCommit]) === null ||
+		tryRunGit(['merge-base', '--is-ancestor', tagCommit, 'HEAD']) === null ||
+		getPackageImpactingChangesSince(tagCommit).length > 0
+	) {
+		throw new Error(`${releaseTag} does not identify this prepared package on main`);
 	}
-	return tagSha === runGit(['rev-parse', 'HEAD']);
 }
 
 function findPreparedReleaseCommit(releaseTag) {
@@ -98,7 +105,7 @@ function findPreparedReleaseCommit(releaseTag) {
 }
 
 function getPackageImpactingChangesSince(commit) {
-	const output = tryRunGit([
+	const output = runGit([
 		'diff',
 		'--name-only',
 		`${commit}..HEAD`,
@@ -131,6 +138,7 @@ function assertPreparedReleaseState(rootDirectory, releaseTag) {
 			`current version already matches ${releaseTag}, but CHANGELOG.md has no release entry`,
 		);
 	}
+	assertPreparedReleaseTag(releaseTag, releaseCommit);
 }
 
 function main() {
@@ -157,9 +165,6 @@ function main() {
 	assertTagDoesNotExist(requested.version);
 	if (preparedRelease) {
 		assertPreparedReleaseState(rootDirectory, releaseTag);
-		if (tryRunGit(['rev-parse', '--verify', releaseTag]) && !tagPointsToHead(releaseTag)) {
-			throw new Error(`${releaseTag} exists but does not point to HEAD`);
-		}
 	} else {
 		assertTagDoesNotExist(releaseTag);
 	}

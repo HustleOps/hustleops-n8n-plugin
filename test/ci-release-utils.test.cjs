@@ -282,8 +282,9 @@ test('release prepare require-prepared accepts matching release commit', () => {
 	assert.match(output, /Release files are already prepared for v0\.1\.2/);
 });
 
-test('release prepare require-prepared accepts non-package CI fixes after release commit', () => {
+test('release prepare reuses an immutable tag after a workflow-only fix', () => {
 	const directory = createMergedReleaseFixture();
+	childProcess.execFileSync('git', ['tag', 'v0.1.2'], { cwd: directory, stdio: 'ignore' });
 	mergePostReleaseChange(directory, {
 		branch: 'release-ci-fix',
 		subject: 'ci: update release preflight',
@@ -329,4 +330,23 @@ test('release prepare require-prepared accepts release commit merged through pul
 	const output = runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']);
 
 	assert.match(output, /Release files are already prepared for v0\.1\.2/);
+});
+
+test('release prepare rejects a tag that precedes the prepared release commit', () => {
+	const directory = createMergedReleaseFixture();
+	childProcess.execFileSync('git', ['tag', 'v0.1.2', 'HEAD^1'], {
+		cwd: directory,
+		stdio: 'ignore',
+	});
+
+	assert.throws(
+		() => runReleasePrepare(directory, ['--release-tag', 'v0.1.2', '--require-prepared']),
+		(error) => {
+			assert.match(
+				String(error.stderr),
+				/v0\.1\.2 does not identify this prepared package on main/,
+			);
+			return true;
+		},
+	);
 });
