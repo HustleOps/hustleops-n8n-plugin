@@ -833,6 +833,7 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 	assert.match(releaseWorkflow, /release_tag:/);
 	assert.match(releaseWorkflow, /contents:\s*write/);
 	assert.match(releaseWorkflow, /id-token:\s*write/);
+	assert.match(releaseWorkflow, /environment:\s*production/);
 	assert.doesNotMatch(releaseWorkflow, /packages:\s*write/);
 	assert.doesNotMatch(prCheckWorkflow, /uses:\s*actions\/checkout@v4/);
 	assert.doesNotMatch(prCheckWorkflow, /uses:\s*actions\/setup-node@v4/);
