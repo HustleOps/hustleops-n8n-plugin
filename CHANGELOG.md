@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.0 - 2026-11-24
+
+### Features
+
+- **Breaking:** align the n8n plugin with current HustleOps contracts (`api`)
+
 ## v0.1.5 - 2026-07-06
 
 ### CI
