@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
 	ICredentialDataDecryptedObject,
 	ICredentialTestFunctions,
@@ -16,6 +17,8 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import {
 	assertPaginatedResponse,
+	collectionQueryParams,
+	expectedVersion,
 	compactObject,
 	createHustleOpsApiClient,
 	parseJsonArray,
@@ -25,20 +28,7 @@ import {
 	testHustleOpsApiCredentials,
 } from './GenericFunctions';
 import {
-	COMMENT_ENTITY_TYPE_OPTIONS,
-	COMMENT_OPERATION_OPTIONS,
-	COMMENT_RESOURCE_OPTION,
-	assertCommentListResponse,
-	buildCommentEntityQuery,
-	buildCommentSearchQuery,
-	parseCommentMaxResults,
-	sanitizeCreateComment,
-	sanitizeMarkReadComment,
-	sanitizeToggleReaction,
-	sanitizeUpdateComment,
-	type CommentOperation,
-} from './commentDefinitions';
-import {
+	CUSTOM_FIELD_ENTITY_TYPE_OPTIONS,
 	CUSTOM_FIELD_OPERATION_OPTIONS,
 	CUSTOM_FIELD_RESOURCE_OPTION,
 	customFieldBatchBody,
@@ -47,8 +37,6 @@ import {
 	mergeCustomFieldValues,
 	parseCustomFieldValues,
 	sanitizeCustomFieldDefinitionBody,
-	sanitizeCustomFieldDefinitionBulkDelete,
-	sanitizeCustomFieldDefinitionBulkUpdate,
 	sanitizeCustomFieldGroupBody,
 	type CustomFieldOperation,
 } from './customFieldDefinitions';
@@ -59,8 +47,7 @@ import {
 	type CoreResourceDefinition,
 	type DtoOperation,
 	type FieldSpec,
-	buildGenericSearchRequest,
-	buildSearchRequest,
+	buildCollectionRequest,
 	getCoreResourceDefinition,
 	sanitizeDtoBody,
 } from './resourceDefinitions';
@@ -105,13 +92,7 @@ const STRUCTURED_CORE_FIELDS_NODE: INode = {
 	parameters: {},
 };
 
-const OPERATIONS_WITH_ID: HustleOpsOperation[] = [
-	'get',
-	'update',
-	'setTags',
-	'addTags',
-	'removeTag',
-];
+const OPERATIONS_WITH_ID: HustleOpsOperation[] = ['get', 'setTags', 'addTags', 'removeTag'];
 const CORE_RESOURCE_VALUES = CORE_RESOURCE_OPTIONS.map((option) => option.value) as CoreResource[];
 const PAYLOAD_OPERATION_VALUES = [
 	'search',
@@ -120,7 +101,6 @@ const PAYLOAD_OPERATION_VALUES = [
 	'update',
 	'setTags',
 	'addTags',
-	'toggleReaction',
 	'updateColor',
 	'bulkUpdateColor',
 	'bulkDelete',
@@ -137,7 +117,6 @@ const PAYLOAD_OPERATION_VALUES = [
 ] as const;
 const HUSTLEOPS_RESOURCE_OPTIONS: INodePropertyOptions[] = [
 	...CORE_RESOURCE_OPTIONS,
-	COMMENT_RESOURCE_OPTION,
 	TAG_RESOURCE_OPTION,
 	CUSTOM_FIELD_RESOURCE_OPTION,
 ];
@@ -347,7 +326,9 @@ function buildCoreUpdateFieldProperties(): INodeProperties[] {
 		type: 'collection',
 		placeholder: 'Add Field',
 		default: {},
-		options: definition.updateFields.map((field) => buildFieldProperty(definition, field, false)),
+		options: definition.updateFields
+			.filter((field) => field !== 'version')
+			.map((field) => buildFieldProperty(definition, field, false)),
 		displayOptions: modeDisplayOptions(
 			[definition.resource],
 			['update'],
@@ -365,7 +346,6 @@ const JSON_OBJECT_PAYLOAD_OPERATIONS: Record<string, readonly string[]> = {
 	incident: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
 	observable: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
 	knowledge: ['search', 'count', 'create', 'update', 'setTags', 'addTags'],
-	comment: ['create', 'update', 'toggleReaction'],
 	tag: ['search', 'create', 'updateColor', 'bulkUpdateColor', 'bulkDelete'],
 	customField: [
 		'searchDefinitions',
@@ -404,24 +384,15 @@ const TAG_SEARCH_REQUEST_DEFINITION = {
 	displayName: 'Tag',
 	defaultSortBy: 'value',
 	defaultSortOrder: 'asc',
-	searchFields: ['value', 'color', 'createdAt', 'updatedAt'],
-	sortFields: ['value', 'createdAt', 'updatedAt'],
+	searchFields: ['id', 'usage'],
+	sortFields: ['value', 'color', 'createdAt', 'updatedAt'],
 } as const;
 const CUSTOM_FIELD_DEFINITION_SEARCH_REQUEST_DEFINITION = {
 	displayName: 'Custom Field Definition',
 	defaultSortBy: 'createdAt',
 	defaultSortOrder: 'desc',
-	searchFields: [
-		'name',
-		'description',
-		'fieldType',
-		'entityTypes',
-		'groupId',
-		'isRequired',
-		'createdAt',
-		'updatedAt',
-	],
-	sortFields: ['name', 'fieldType', 'createdAt', 'updatedAt'],
+	searchFields: ['id', 'entityType', 'fieldType', 'groupId', 'isRequired'],
+	sortFields: ['name', 'fieldType', 'isRequired', 'createdAt', 'updatedAt'],
 } as const;
 
 function shouldOmitStructuredValue(value: unknown): boolean {
@@ -582,6 +553,15 @@ function buildStructuredDtoBody(
 			'Additional Fields',
 			itemIndex,
 		);
+		if (
+			definition.resource === 'alert' &&
+			!shouldOmitStructuredValue(additionalFields.incidentId)
+		) {
+			throw new NodeOperationError(
+				context.getNode(),
+				'Set the versioned incident reference in Command References.',
+			);
+		}
 		for (const field of definition.createFields) {
 			if (definition.requiredCreateFields.includes(field)) {
 				continue;
@@ -604,15 +584,31 @@ function buildStructuredDtoBody(
 			'Fields to Update',
 			itemIndex,
 		);
+		if (
+			definition.resource === 'alert' &&
+			Object.prototype.hasOwnProperty.call(fieldsToUpdate, 'incidentId')
+		) {
+			throw new NodeOperationError(
+				context.getNode(),
+				'Set currentIncident and destinationIncident in Command References.',
+			);
+		}
 		for (const field of definition.updateFields) {
+			if (!Object.prototype.hasOwnProperty.call(fieldsToUpdate, field)) {
+				continue;
+			}
+			const value = fieldsToUpdate[field];
+			const preserveEmptyString =
+				value === '' &&
+				(field === 'summary' || (definition.resource === 'knowledge' && field === 'description'));
 			assignStructuredField(
 				context,
 				structuredBody,
 				structuredFields,
 				definition,
 				field,
-				fieldsToUpdate[field],
-				true,
+				value,
+				!preserveEmptyString,
 				itemIndex,
 			);
 		}
@@ -627,28 +623,130 @@ function buildStructuredDtoBody(
 	}
 }
 
-function buildCoreDtoBody(
+function buildCoreCommand(
 	context: IExecuteFunctions,
 	itemIndex: number,
 	definition: CoreResourceDefinition,
 	operation: DtoOperation,
 ): IDataObject {
-	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
-		const body = normalizeMergedDtoBody(
-			context,
-			jsonObjectPayload(
-				context,
-				itemIndex,
-				definition.resource,
-				operation,
-				`${definition.displayName} ${operation} JSON Object`,
-			),
-			definition,
-			itemIndex,
-		);
-		return sanitizeDtoBody(definition, operation, body);
+	const isJson = payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT;
+	const raw = isJson
+		? jsonObjectPayload(context, itemIndex, definition.resource, operation, 'Command JSON Object')
+		: undefined;
+	if (raw && 'items' in raw) {
+		const items = commandItems(raw.items);
+		if (operation === 'update') items.forEach(validateTarget);
+		return { ...raw, items };
 	}
-	return buildStructuredDtoBody(context, itemIndex, definition, operation);
+	const fields = raw
+		? sanitizeDtoBody(
+				definition,
+				operation,
+				normalizeMergedDtoBody(context, raw, definition, itemIndex),
+			)
+		: buildStructuredDtoBody(context, itemIndex, definition, operation);
+	const references = buildCommandReferences(
+		context,
+		itemIndex,
+		definition.resource,
+		operation,
+		isJson,
+	);
+	if (operation === 'create') return createCommand(fields, references);
+
+	const { version, ...changes } = fields;
+	if (Object.keys(changes).length === 0 && !('destinationIncident' in references)) {
+		throw new NodeOperationError(
+			context.getNode(),
+			'Update requires at least one field to change.',
+		);
+	}
+	if (
+		definition.resource === 'alert' &&
+		('detectedAt' in changes || 'destinationIncident' in references) &&
+		!('currentIncident' in references)
+	) {
+		throw new NodeOperationError(
+			context.getNode(),
+			'Supply currentIncident in Command References. Use null for an unlinked alert.',
+		);
+	}
+	const id = readTargetId(context, itemIndex, 'id', 'Record ID');
+	return {
+		items: [
+			{ id, expectedVersion: nodeVersion(context, itemIndex, version), changes, ...references },
+		],
+	};
+}
+
+function buildCommandReferences(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	resource: CoreResource,
+	operation: DtoOperation,
+	isJson: boolean,
+): IDataObject {
+	const allowed =
+		resource === 'alert'
+			? operation === 'create'
+				? ['incident']
+				: ['currentIncident', 'destinationIncident', 'assigneeMembership']
+			: resource === 'incident'
+				? ['assigneeMembership']
+				: [];
+	const references =
+		!isJson && allowed.length
+			? parseJsonObject(
+					context,
+					context.getNodeParameter('payloadCommandReferences', itemIndex, '{}'),
+					'Command References',
+					itemIndex,
+				)
+			: {};
+	for (const [name, reference] of Object.entries(references)) {
+		if (!allowed.includes(name))
+			throw new NodeOperationError(context.getNode(), `Unsupported command reference: ${name}.`);
+		if (reference === null && name !== 'assigneeMembership') continue;
+		if (!reference || typeof reference !== 'object' || Array.isArray(reference)) {
+			throw new NodeOperationError(
+				context.getNode(),
+				`${name} must provide id and expectedVersion.`,
+			);
+		}
+		validateTarget(reference as IDataObject);
+	}
+	return resource === 'alert' && operation === 'create'
+		? { incident: null, ...references }
+		: references;
+}
+
+function createCommand(data: IDataObject, references: IDataObject = {}): IDataObject {
+	return { items: [{ clientRequestId: randomUUID(), data, ...references }] };
+}
+
+function nodeVersion(context: IExecuteFunctions, itemIndex: number, fallback?: unknown): number {
+	const selected = context.getNodeParameter('expectedVersion', itemIndex, -1);
+	return expectedVersion(selected === -1 ? fallback : selected);
+}
+
+function commandItems(value: unknown): IDataObject[] {
+	if (
+		!Array.isArray(value) ||
+		value.length < 1 ||
+		value.length > 100 ||
+		value.some((item) => !item || typeof item !== 'object' || Array.isArray(item))
+	) {
+		throw new NodeOperationError(
+			STRUCTURED_CORE_FIELDS_NODE,
+			'Supply an array of 1 to 100 command items.',
+		);
+	}
+	return value as IDataObject[];
+}
+
+function validateTarget(item: IDataObject): void {
+	safePathSegment(item.id as string, 'Record ID');
+	expectedVersion(item.expectedVersion);
 }
 
 function buildSearchFieldsBody(context: IExecuteFunctions, itemIndex: number): IDataObject {
@@ -697,41 +795,7 @@ function buildCoreSearchBody(
 					`${definition.displayName} ${operation} JSON Object`,
 				)
 			: buildSearchFieldsBody(context, itemIndex);
-	return buildSearchRequest(definition, input);
-}
-
-function buildCommentPayload(
-	context: IExecuteFunctions,
-	itemIndex: number,
-	operation: CommentOperation,
-): IDataObject {
-	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
-		return jsonObjectPayload(context, itemIndex, 'comment', operation, 'Comment JSON Object');
-	}
-	if (operation === 'create') {
-		const attachmentIds = parseJsonArray(
-			context,
-			context.getNodeParameter('payloadCommentAttachmentIds', itemIndex, '[]'),
-			'Comment Attachment IDs',
-			itemIndex,
-		);
-		return compactObject({
-			content: optionalStringParameter(
-				context.getNodeParameter('payloadCommentContent', itemIndex, ''),
-			),
-			parentId: optionalStringParameter(
-				context.getNodeParameter('payloadCommentParentId', itemIndex, ''),
-			),
-			attachmentIds: attachmentIds.length === 0 ? undefined : attachmentIds,
-		});
-	}
-	if (operation === 'update') {
-		return { content: context.getNodeParameter('payloadCommentContent', itemIndex, '') };
-	}
-	if (operation === 'toggleReaction') {
-		return { emoji: context.getNodeParameter('payloadCommentEmoji', itemIndex, '') };
-	}
-	return {};
+	return buildCollectionRequest(definition, input);
 }
 
 function buildTagPayload(
@@ -744,7 +808,7 @@ function buildTagPayload(
 			payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT
 				? jsonObjectPayload(context, itemIndex, 'tag', operation, 'Tag JSON Object')
 				: buildSearchFieldsBody(context, itemIndex);
-		return buildGenericSearchRequest(TAG_SEARCH_REQUEST_DEFINITION, input);
+		return buildCollectionRequest(TAG_SEARCH_REQUEST_DEFINITION, input);
 	}
 	if (payloadMode(context, itemIndex) === PAYLOAD_MODE_JSON_OBJECT) {
 		return jsonObjectPayload(context, itemIndex, 'tag', operation, 'Tag JSON Object');
@@ -758,27 +822,18 @@ function buildTagPayload(
 	if (operation === 'updateColor') {
 		return { color: context.getNodeParameter('payloadTagColor', itemIndex, '') };
 	}
-	if (operation === 'bulkUpdateColor') {
-		return compactObject({
-			ids: parseJsonArray(
+	if (operation === 'bulkUpdateColor' || operation === 'bulkDelete') {
+		return {
+			items: parseJsonArray(
 				context,
-				context.getNodeParameter('payloadTagIds', itemIndex, '[]'),
-				'Tag IDs',
+				context.getNodeParameter('payloadTagItems', itemIndex, '[]'),
+				'Command Items',
 				itemIndex,
-			),
-			color: optionalStringParameter(context.getNodeParameter('payloadTagColor', itemIndex, '')),
-		});
-	}
-	if (operation === 'bulkDelete') {
-		return compactObject({
-			ids: parseJsonArray(
-				context,
-				context.getNodeParameter('payloadTagIds', itemIndex, '[]'),
-				'Tag IDs',
-				itemIndex,
-			),
-			force: context.getNodeParameter('payloadTagForce', itemIndex, undefined),
-		});
+			) as IDataObject[],
+			...(operation === 'bulkDelete'
+				? { force: context.getNodeParameter('payloadTagForce', itemIndex, false) }
+				: {}),
+		};
 	}
 	return {};
 }
@@ -835,7 +890,7 @@ function buildCustomFieldBodyPayload(
 						'Custom Field Definition Search JSON Object',
 					)
 				: buildSearchFieldsBody(context, itemIndex);
-		return buildGenericSearchRequest(CUSTOM_FIELD_DEFINITION_SEARCH_REQUEST_DEFINITION, input);
+		return buildCollectionRequest(CUSTOM_FIELD_DEFINITION_SEARCH_REQUEST_DEFINITION, input);
 	}
 	if (
 		operation === 'batchGetValues' &&
@@ -878,24 +933,18 @@ function buildCustomFieldBodyPayload(
 			itemIndex,
 		);
 	}
-	if (operation === 'bulkUpdateDefinitions') {
-		return parseJsonObject(
-			context,
-			context.getNodeParameter('payloadCustomFieldDefinitionBulkFields', itemIndex, '{}'),
-			'Custom Field Definition Bulk Fields',
-			itemIndex,
-		);
-	}
-	if (operation === 'bulkDeleteDefinitions') {
-		return compactObject({
-			ids: parseJsonArray(
+	if (operation === 'bulkUpdateDefinitions' || operation === 'bulkDeleteDefinitions') {
+		return {
+			items: parseJsonArray(
 				context,
-				context.getNodeParameter('payloadCustomFieldDefinitionIds', itemIndex, '[]'),
-				'Custom Field Definition IDs',
+				context.getNodeParameter('payloadCustomFieldItems', itemIndex, '[]'),
+				'Command Items',
 				itemIndex,
-			),
-			force: context.getNodeParameter('payloadCustomFieldDefinitionForce', itemIndex, undefined),
-		});
+			) as IDataObject[],
+			...(operation === 'bulkDeleteDefinitions'
+				? { force: context.getNodeParameter('payloadCustomFieldDefinitionForce', itemIndex, false) }
+				: {}),
+		};
 	}
 	if (operation === 'batchGetValues') {
 		return customFieldBatchBody(
@@ -940,186 +989,6 @@ function customFieldPayloadRows(
 		'Custom Field Values',
 		itemIndex,
 	);
-}
-
-async function executeCommentOperation(
-	context: IExecuteFunctions,
-	itemIndex: number,
-	operation: CommentOperation,
-	returnData: INodeExecutionData[],
-): Promise<void> {
-	if (operation === 'list') {
-		const query = buildCommentEntityQuery(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityId: context.getNodeParameter('entityId', itemIndex),
-				take: context.getNodeParameter('take', itemIndex, 50),
-				cursor: context.getNodeParameter('cursor', itemIndex, ''),
-			},
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = assertCommentListResponse(
-			await client.request('GET', '/comments', undefined, query),
-			'Comment list response',
-		);
-		const includeMetadata = context.getNodeParameter(
-			'includeCommentPaginationMetadata',
-			itemIndex,
-			false,
-		) as boolean;
-		if (includeMetadata) {
-			returnData.push({ json: response, pairedItem: { item: itemIndex } });
-			return;
-		}
-		for (const row of response.items) {
-			returnData.push({ json: row, pairedItem: { item: itemIndex } });
-		}
-		return;
-	}
-
-	if (operation === 'search') {
-		const query = buildCommentSearchQuery(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityId: context.getNodeParameter('entityId', itemIndex),
-				q: context.getNodeParameter('q', itemIndex),
-			},
-			itemIndex,
-		);
-		const maxResults = parseCommentMaxResults(
-			context,
-			context.getNodeParameter('maxResults', itemIndex, 100),
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject[]>(
-			'GET',
-			'/comments/search',
-			undefined,
-			query,
-		);
-		if (!Array.isArray(response)) {
-			throw new NodeOperationError(context.getNode(), 'Comment search response must be an array.', {
-				itemIndex,
-			});
-		}
-		for (const row of response.slice(0, maxResults)) {
-			returnData.push({ json: row, pairedItem: { item: itemIndex } });
-		}
-		return;
-	}
-
-	if (operation === 'unreadCount') {
-		const query = buildCommentEntityQuery(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityId: context.getNodeParameter('entityId', itemIndex),
-			},
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<number>(
-			'GET',
-			'/comments/unread-count',
-			undefined,
-			query,
-		);
-		if (typeof response !== 'number') {
-			throw new NodeOperationError(
-				context.getNode(),
-				'Comment unread count response must be a number.',
-				{ itemIndex },
-			);
-		}
-		returnData.push({ json: { unreadCount: response }, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	if (operation === 'create') {
-		const body = sanitizeCreateComment(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityId: context.getNodeParameter('entityId', itemIndex),
-			},
-			buildCommentPayload(context, itemIndex, operation),
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>('POST', '/comments', body);
-		returnData.push({ json: response, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	if (operation === 'markRead') {
-		const body = sanitizeMarkReadComment(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityId: context.getNodeParameter('entityId', itemIndex),
-			},
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		await client.request('POST', '/comments/read', body);
-		returnData.push({ json: { success: true, ...body }, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	const commentId = safePathSegment(
-		context.getNodeParameter('commentId', itemIndex) as string,
-		'Comment ID',
-	);
-
-	if (operation === 'update') {
-		const body = sanitizeUpdateComment(
-			context,
-			buildCommentPayload(context, itemIndex, operation),
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>('PATCH', `/comments/${commentId}`, body);
-		returnData.push({ json: response, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	if (operation === 'delete') {
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>('DELETE', `/comments/${commentId}`);
-		returnData.push({ json: response, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	if (operation === 'toggleReaction') {
-		const body = sanitizeToggleReaction(
-			context,
-			buildCommentPayload(context, itemIndex, operation),
-			itemIndex,
-		);
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>(
-			'POST',
-			`/comments/${commentId}/reactions`,
-			body,
-		);
-		returnData.push({ json: response, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	if (operation === 'togglePin') {
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>('PATCH', `/comments/${commentId}/pin`);
-		returnData.push({ json: response, pairedItem: { item: itemIndex } });
-		return;
-	}
-
-	throw new NodeOperationError(context.getNode(), `Unsupported Comment operation: ${operation}`, {
-		itemIndex,
-	});
 }
 
 function pushResponse(
@@ -1183,17 +1052,6 @@ function optionFromRow(row: IDataObject, fallbackPrefix: string): INodePropertyO
 	};
 }
 
-function hasOptionRows(response: unknown): boolean {
-	if (Array.isArray(response)) {
-		return true;
-	}
-	if (response && typeof response === 'object') {
-		const objectResponse = response as IDataObject;
-		return ['data', 'items', 'values'].some((key) => Array.isArray(objectResponse[key]));
-	}
-	return false;
-}
-
 function picklistOptionFromRow(
 	row: IDataObject,
 	fallbackPrefix: string,
@@ -1221,10 +1079,41 @@ async function loadOptionsFromPath(
 	fallbackPrefix: string,
 ): Promise<INodePropertyOptions[]> {
 	const client = await createHustleOpsApiClient(context, 0);
-	const response = await client.request('GET', path);
-	return extractOptionRows(response)
-		.map((row) => optionFromRow(row, fallbackPrefix))
-		.filter((option) => option.value !== '');
+	const options: INodePropertyOptions[] = [];
+	if (path === '/tags/auxiliary/list') {
+		let cursor: string | undefined;
+		for (let page = 1; page <= 100; page++) {
+			const response = await client.request('GET', path, undefined, { limit: 100, cursor });
+			if (!Array.isArray(response.data))
+				throw new NodeOperationError(
+					context.getNode(),
+					'Tag catalog response must include a data array.',
+				);
+			options.push(...extractOptionRows(response).map((row) => optionFromRow(row, fallbackPrefix)));
+			const next = response.nextCursor;
+			if (typeof next !== 'string' || next === '') break;
+			if (next === cursor || page === 100)
+				throw new NodeOperationError(
+					context.getNode(),
+					'The tag catalog could not be loaded completely.',
+				);
+			cursor = next;
+		}
+	} else {
+		await client.requestEachPage(path, { limit: 100 }, { method: 'GET' }, (row) =>
+			options.push(optionFromRow(row, fallbackPrefix)),
+		);
+	}
+	return options.filter((option) => option.value !== '');
+}
+
+function fieldFilter(field: string, value: string): IDataObject {
+	return {
+		expression: {
+			operator: 'AND',
+			groups: [{ operator: 'AND', conditions: [{ field, operator: 'eq', value }] }],
+		},
+	};
 }
 
 async function loadPicklistOptions(
@@ -1234,16 +1123,54 @@ async function loadPicklistOptions(
 	valueTransform?: FieldSpec['picklistValueTransform'],
 ): Promise<INodePropertyOptions[]> {
 	const client = await createHustleOpsApiClient(context, 0);
-	const response = await client.request('GET', `/picklists/${domain}`);
-	if (!hasOptionRows(response)) {
+	const options: INodePropertyOptions[] = [];
+	await client.requestEachPage(
+		'/picklists/auxiliary/list',
+		{
+			filter: fieldFilter('domain', domain),
+			sort: 'sortOrder',
+			limit: 100,
+		},
+		{ method: 'GET', maxPages: 1000 },
+		(row) => {
+			const option = picklistOptionFromRow(row, fallbackPrefix, valueTransform);
+			if (option) options.push(option);
+		},
+	);
+	return options;
+}
+
+function readTargetId(
+	context: IExecuteFunctions,
+	itemIndex: number,
+	name: string,
+	label: string,
+): string {
+	return safePathSegment(context.getNodeParameter(name, itemIndex) as string, label);
+}
+
+function deleteCommand(items: IDataObject[], force: unknown): IDataObject {
+	items.forEach(validateTarget);
+	if (force !== undefined && typeof force !== 'boolean') {
+		throw new NodeOperationError(STRUCTURED_CORE_FIELDS_NODE, 'Force must be a boolean.');
+	}
+	return { items, force };
+}
+
+function tagDeleteItem(item: IDataObject): IDataObject {
+	const { id, expectedVersion: version, expectedUsageCounts, affectedRecords } = item;
+	if (
+		!expectedUsageCounts ||
+		typeof expectedUsageCounts !== 'object' ||
+		Array.isArray(expectedUsageCounts) ||
+		!Array.isArray(affectedRecords)
+	) {
 		throw new NodeOperationError(
-			context.getNode(),
-			`HustleOps picklist ${domain} response must be an array or contain a data, items, or values array.`,
+			STRUCTURED_CORE_FIELDS_NODE,
+			'Each tag delete item requires expectedUsageCounts and affectedRecords from the reviewed deletion impact.',
 		);
 	}
-	return extractOptionRows(response)
-		.map((row) => picklistOptionFromRow(row, fallbackPrefix, valueTransform))
-		.filter((option): option is INodePropertyOptions => option !== undefined);
+	return { id, expectedVersion: version, expectedUsageCounts, affectedRecords };
 }
 
 async function executeTagOperation(
@@ -1252,79 +1179,115 @@ async function executeTagOperation(
 	operation: TagOperation,
 	returnData: INodeExecutionData[],
 ): Promise<void> {
-	if (operation === 'list') {
+	if (operation === 'list' || operation === 'search') {
+		if (operation === 'search') {
+			const body = buildTagPayload(context, itemIndex, operation);
+			const client = await createHustleOpsApiClient(context, itemIndex);
+			pushPaginatedRows(
+				returnData,
+				await client.request('GET', '/tags', undefined, collectionQueryParams(body)),
+				'Tag search response',
+				itemIndex,
+			);
+			return;
+		}
+		const withCounts = context.getNodeParameter('withCounts', itemIndex, false) as boolean;
+		const fields = withCounts
+			? 'all'
+			: ['id', 'value', 'color', 'version', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'];
 		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject[] | IDataObject>('GET', '/tags', undefined, {
-			withCounts: context.getNodeParameter('withCounts', itemIndex, false) as boolean,
-		});
-		pushResponse(returnData, response, itemIndex);
+		await client.requestEachPage('/tags', { fields, limit: 100 }, { method: 'GET' }, (row) =>
+			pushResponse(returnData, row, itemIndex),
+		);
 		return;
 	}
 
+	const tagId = () => readTargetId(context, itemIndex, 'tagId', 'Tag ID');
+	if (operation === 'getDeletionImpact') {
+		const id = tagId();
+		const client = await createHustleOpsApiClient(context, itemIndex);
+		pushResponse(returnData, await client.request('GET', `/tags/${id}/deletion-impact`), itemIndex);
+		return;
+	}
+
+	let path: string;
+	let command: IDataObject;
 	if (operation === 'delete') {
-		const tagId = safePathSegment(context.getNodeParameter('tagId', itemIndex) as string, 'Tag ID');
-		const force = context.getNodeParameter('force', itemIndex, false) as boolean;
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>('DELETE', `/tags/${tagId}`, undefined, {
-			force: force ? true : undefined,
-		});
-		pushResponse(returnData, response, itemIndex);
-		return;
+		const snapshot = parseJsonObject(
+			context,
+			context.getNodeParameter('payloadTagDeletionImpact', itemIndex, '{}'),
+			'Deletion Impact',
+			itemIndex,
+		);
+		const id = tagId();
+		if (typeof snapshot.id !== 'string' || snapshot.id.toLowerCase() !== id.toLowerCase()) {
+			throw new NodeOperationError(
+				context.getNode(),
+				'Deletion Impact must be for the selected tag.',
+			);
+		}
+		const affectedRecords = Array.isArray(snapshot.affectedRecords)
+			? snapshot.affectedRecords.map((row) => ({
+					id: row?.id,
+					entityType: row?.entityType,
+					expectedVersion: row?.version,
+				}))
+			: undefined;
+		command = deleteCommand(
+			[
+				tagDeleteItem({
+					id,
+					expectedVersion: snapshot.version,
+					expectedUsageCounts: snapshot.usageCounts,
+					affectedRecords,
+				}),
+			],
+			context.getNodeParameter('force', itemIndex, false),
+		);
+		path = '/tags/delete';
+	} else {
+		const body = buildTagPayload(context, itemIndex, operation);
+		if (operation === 'create') {
+			command = createCommand(sanitizeTagBody(context, 'create', body, itemIndex));
+			path = '/tags';
+		} else if (operation === 'bulkDelete') {
+			command = deleteCommand(commandItems(body.items).map(tagDeleteItem), body.force);
+			path = '/tags/delete';
+		} else if (operation === 'updateColor') {
+			const { version, ...color } = body;
+			command = {
+				items: [
+					{
+						id: tagId(),
+						expectedVersion: nodeVersion(context, itemIndex, version),
+						changes: sanitizeTagBody(context, 'updateColor', color, itemIndex),
+					},
+				],
+			};
+			path = '/tags/update';
+		} else if (operation === 'bulkUpdateColor') {
+			command = {
+				items: commandItems(body.items).map((item) => {
+					validateTarget(item);
+					return {
+						id: item.id,
+						expectedVersion: item.expectedVersion,
+						changes: sanitizeTagBody(
+							context,
+							'updateColor',
+							(item.changes as IDataObject) ?? {},
+							itemIndex,
+						),
+					};
+				}),
+			};
+			path = '/tags/update';
+		} else {
+			throw new NodeOperationError(context.getNode(), `Unsupported Tag operation: ${operation}`);
+		}
 	}
-
-	const body = buildTagPayload(context, itemIndex, operation);
 	const client = await createHustleOpsApiClient(context, itemIndex);
-
-	if (operation === 'search') {
-		const response = await client.request<IDataObject>('POST', '/tags/search', body);
-		pushPaginatedRows(returnData, response, 'Tag search response', itemIndex);
-		return;
-	}
-
-	if (operation === 'create') {
-		const response = await client.request<IDataObject>(
-			'POST',
-			'/tags',
-			sanitizeTagBody(context, operation, body, itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'updateColor') {
-		const tagId = safePathSegment(context.getNodeParameter('tagId', itemIndex) as string, 'Tag ID');
-		const response = await client.request<IDataObject>(
-			'PATCH',
-			`/tags/${tagId}`,
-			sanitizeTagBody(context, operation, body, itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'bulkUpdateColor') {
-		const response = await client.request<IDataObject>(
-			'PATCH',
-			'/tags/bulk',
-			sanitizeTagBody(context, operation, body, itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'bulkDelete') {
-		const response = await client.request<IDataObject>(
-			'POST',
-			'/tags/bulk-delete',
-			sanitizeTagBody(context, operation, body, itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	throw new NodeOperationError(context.getNode(), `Unsupported Tag operation: ${operation}`, {
-		itemIndex,
-	});
+	pushResponse(returnData, await client.request('POST', path, command), itemIndex);
 }
 
 async function executeEntityTagOperation(
@@ -1335,30 +1298,44 @@ async function executeEntityTagOperation(
 	returnData: INodeExecutionData[],
 ): Promise<void> {
 	const definition = getCoreResourceDefinition(resource);
-	const entityId = safePathSegment(
-		context.getNodeParameter('id', itemIndex) as string,
-		`${definition.displayName} ID`,
-	);
-
-	if (operation === 'removeTag') {
-		const tagId = safePathSegment(context.getNodeParameter('tagId', itemIndex) as string, 'Tag ID');
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>(
-			'DELETE',
-			`${definition.path}/${entityId}/tags/${tagId}`,
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	const body = buildEntityTagBody(context, itemIndex, resource, operation);
+	const id = readTargetId(context, itemIndex, 'id', `${definition.displayName} ID`);
+	const version = nodeVersion(context, itemIndex);
+	const change =
+		operation === 'removeTag'
+			? { tagId: readTargetId(context, itemIndex, 'tagId', 'Tag ID') }
+			: buildEntityTagBody(context, itemIndex, resource, operation);
+	const action = { setTags: 'replace', addTags: 'add', removeTag: 'remove' }[operation];
 	const client = await createHustleOpsApiClient(context, itemIndex);
-	const response = await client.request<IDataObject>(
-		operation === 'setTags' ? 'PUT' : 'POST',
-		`${definition.path}/${entityId}/tags`,
-		body,
-	);
+	const response = await client.request('POST', `${definition.path}/tags/${action}`, {
+		items: [{ id, expectedVersion: version, ...change }],
+	});
 	pushResponse(returnData, response, itemIndex);
+}
+
+function customFieldRecordPath(entityType: string): string {
+	const definition = Object.values(CORE_RESOURCE_DEFINITIONS).find(
+		(record) => record.entityType === entityType,
+	);
+	if (!definition)
+		throw new NodeOperationError(
+			STRUCTURED_CORE_FIELDS_NODE,
+			'Unsupported custom field entity type.',
+		);
+	return definition.path;
+}
+
+function customFieldDeleteItem(item: IDataObject, dependencyKey: string): IDataObject {
+	if (!Array.isArray(item[dependencyKey])) {
+		throw new NodeOperationError(
+			STRUCTURED_CORE_FIELDS_NODE,
+			`Each custom field delete item requires an explicit ${dependencyKey} array.`,
+		);
+	}
+	return {
+		id: item.id,
+		expectedVersion: item.expectedVersion,
+		[dependencyKey]: item[dependencyKey],
+	};
 }
 
 async function executeCustomFieldOperation(
@@ -1367,82 +1344,54 @@ async function executeCustomFieldOperation(
 	operation: CustomFieldOperation,
 	returnData: INodeExecutionData[],
 ): Promise<void> {
-	if (operation === 'listGroups') {
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		pushResponse(returnData, await client.request('GET', '/custom-fields/groups'), itemIndex);
-		return;
-	}
-
-	if (operation === 'listDefinitions') {
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		pushResponse(returnData, await client.request('GET', '/custom-fields/definitions'), itemIndex);
-		return;
-	}
-
-	if (operation === 'deleteGroup') {
-		const groupId = safePathSegment(
-			context.getNodeParameter('customFieldGroupId', itemIndex) as string,
-			'Custom field group ID',
-		);
-		const force = context.getNodeParameter('force', itemIndex, false) as boolean;
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>(
-			'DELETE',
-			`/custom-fields/groups/${groupId}`,
-			undefined,
-			{ force: force ? true : undefined },
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'deleteDefinition') {
-		const definitionId = safePathSegment(
-			context.getNodeParameter('customFieldDefinitionId', itemIndex) as string,
-			'Custom field definition ID',
-		);
-		const force = context.getNodeParameter('force', itemIndex, false) as boolean;
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>(
-			'DELETE',
-			`/custom-fields/definitions/${definitionId}`,
-			undefined,
-			{ force: force ? true : undefined },
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'getValues' || operation === 'getAvailable') {
-		const scope = customFieldEntityScope(
-			context,
-			{
-				entityType: context.getNodeParameter('entityType', itemIndex),
-				entityId: context.getNodeParameter('entityId', itemIndex),
-			},
-			itemIndex,
-		);
-		const pathPrefix =
-			operation === 'getValues' ? '/custom-fields/values' : '/custom-fields/available';
-		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>(
-			'GET',
-			`${pathPrefix}/${scope.entityType}/${safePathSegment(scope.entityId, 'Custom field entity ID')}`,
-		);
-		pushResponse(returnData, response, itemIndex);
+	if (
+		operation === 'listGroups' ||
+		operation === 'listDefinitions' ||
+		operation === 'searchDefinitions'
+	) {
+		const path = operation === 'listGroups' ? '/custom-fields/groups' : '/custom-fields';
+		if (operation === 'searchDefinitions') {
+			const input = buildCustomFieldBodyPayload(context, itemIndex, operation);
+			const client = await createHustleOpsApiClient(context, itemIndex);
+			pushPaginatedRows(
+				returnData,
+				await client.request('GET', path, undefined, collectionQueryParams(input)),
+				'Custom field search response',
+				itemIndex,
+			);
+		} else {
+			const client = await createHustleOpsApiClient(context, itemIndex);
+			await client.requestEachPage(path, { limit: 100 }, { method: 'GET' }, (row) =>
+				pushResponse(returnData, row, itemIndex),
+			);
+		}
 		return;
 	}
 
 	if (operation === 'batchGetValues') {
 		const body = buildCustomFieldBodyPayload(context, itemIndex, operation);
+		const path = customFieldRecordPath(String(body.entityType));
 		const client = await createHustleOpsApiClient(context, itemIndex);
-		const response = await client.request<IDataObject>('POST', '/custom-fields/values/batch', body);
-		pushResponse(returnData, response, itemIndex);
+		const data: IDataObject[] = [];
+		for (const entityId of body.entityIds as string[]) {
+			data.push(
+				await client.request(
+					'GET',
+					`${path}/${safePathSegment(entityId, 'Entity ID')}/custom-fields`,
+				),
+			);
+		}
+		pushResponse(returnData, { data }, itemIndex);
 		return;
 	}
 
-	if (operation === 'replaceValues' || operation === 'updateSelectedValuesSafely') {
-		const scope = customFieldEntityScope(
+	if (
+		operation === 'getValues' ||
+		operation === 'getAvailable' ||
+		operation === 'replaceValues' ||
+		operation === 'updateSelectedValuesSafely'
+	) {
+		const { entityId, entityType } = customFieldEntityScope(
 			context,
 			{
 				entityType: context.getNodeParameter('entityType', itemIndex),
@@ -1450,121 +1399,184 @@ async function executeCustomFieldOperation(
 			},
 			itemIndex,
 		);
+		const path = customFieldRecordPath(entityType);
+		const id = safePathSegment(entityId, 'Entity ID');
+		const readPath = `${path}/${id}/custom-fields`;
+
+		if (operation === 'getValues' || operation === 'getAvailable') {
+			const client = await createHustleOpsApiClient(context, itemIndex);
+			const snapshot = await client.request('GET', readPath);
+			if (operation === 'getValues') {
+				pushResponse(returnData, snapshot, itemIndex);
+			} else {
+				const definitions: IDataObject[] = [];
+				await client.requestEachPage(
+					'/custom-fields/auxiliary/list',
+					{ filter: fieldFilter('entityType', entityType), limit: 100 },
+					{ method: 'GET' },
+					(row) => definitions.push(row),
+				);
+				pushResponse(returnData, { ...snapshot, definitions }, itemIndex);
+			}
+			return;
+		}
+
 		const selectedValues = parseCustomFieldValues(
 			context,
 			customFieldPayloadRows(context, itemIndex, operation),
 			itemIndex,
 		);
-		if (operation === 'updateSelectedValuesSafely' && selectedValues.length === 0) {
+		const merge = operation === 'updateSelectedValuesSafely';
+		if (merge && selectedValues.length === 0) {
 			throw new NodeOperationError(
 				context.getNode(),
 				'Update Selected Values Safely requires at least one custom field value.',
-				{ itemIndex },
 			);
 		}
-		const path = `/custom-fields/values/${scope.entityType}/${safePathSegment(
-			scope.entityId,
-			'Custom field entity ID',
-		)}`;
+		const submittedVersion = merge ? undefined : nodeVersion(context, itemIndex);
 		const client = await createHustleOpsApiClient(context, itemIndex);
-		const values =
-			operation === 'replaceValues'
-				? selectedValues
-				: mergeCustomFieldValues(
-						extractAttachedCustomFieldValues(await client.request('GET', path)),
-						selectedValues,
-					);
-		const response = await client.request<IDataObject>('PATCH', path, { values });
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	const body = buildCustomFieldBodyPayload(context, itemIndex, operation);
-	const client = await createHustleOpsApiClient(context, itemIndex);
-
-	if (operation === 'searchDefinitions') {
-		pushPaginatedRows(
+		const snapshot = merge ? await client.request('GET', readPath) : undefined;
+		if (
+			snapshot &&
+			(typeof snapshot.id !== 'string' || snapshot.id.toLowerCase() !== id.toLowerCase())
+		) {
+			throw new NodeOperationError(
+				context.getNode(),
+				'The custom field snapshot does not match the selected entity.',
+			);
+		}
+		const version = snapshot ? expectedVersion(snapshot.version) : submittedVersion;
+		const values = snapshot
+			? mergeCustomFieldValues(extractAttachedCustomFieldValues(snapshot.values), selectedValues)
+			: selectedValues;
+		pushResponse(
 			returnData,
-			await client.request('POST', '/custom-fields/definitions/search', body),
-			'Custom field definition search response',
+			await client.request('POST', `${path}/custom-fields/update`, {
+				items: [{ id, expectedVersion: version, values }],
+			}),
 			itemIndex,
 		);
 		return;
 	}
 
-	if (operation === 'createGroup') {
-		const response = await client.request<IDataObject>(
-			'POST',
-			'/custom-fields/groups',
-			sanitizeCustomFieldGroupBody(context, body, true, itemIndex),
+	const group =
+		operation === 'createGroup' ||
+		operation === 'updateGroup' ||
+		operation === 'deleteGroup' ||
+		operation === 'getGroupDependencies';
+	const path = group ? '/custom-fields/groups' : '/custom-fields';
+	const targetId = () =>
+		readTargetId(
+			context,
+			itemIndex,
+			group ? 'customFieldGroupId' : 'customFieldDefinitionId',
+			group ? 'Custom field group ID' : 'Custom field definition ID',
 		);
-		pushResponse(returnData, response, itemIndex);
+
+	if (operation === 'getGroupDependencies' || operation === 'getDefinitionDependencies') {
+		const id = targetId();
+		const client = await createHustleOpsApiClient(context, itemIndex);
+		const target = await client.request('GET', `${path}/${id}`);
+		const dependencies: IDataObject[] = [];
+		await client.requestEachPage(
+			`${path}/${id}/dependencies`,
+			{ limit: 100 },
+			{ method: 'GET' },
+			(row) => dependencies.push(row),
+		);
+		const affectedRecords = dependencies.map((dependency) => ({
+			id: dependency.id,
+			expectedVersion: dependency.version,
+			...(group ? {} : { entityType: dependency.recordType }),
+		}));
+		pushResponse(
+			returnData,
+			{
+				id: target.id,
+				version: expectedVersion(target.version),
+				[group ? 'affectedDefinitions' : 'affectedEntities']: affectedRecords,
+			},
+			itemIndex,
+		);
 		return;
 	}
 
-	if (operation === 'updateGroup') {
-		const groupId = safePathSegment(
-			context.getNodeParameter('customFieldGroupId', itemIndex) as string,
-			'Custom field group ID',
+	let command: IDataObject;
+	let action: string;
+	if (operation === 'deleteGroup' || operation === 'deleteDefinition') {
+		const dependencyKey = group ? 'affectedDefinitions' : 'affectedEntities';
+		const dependencies = parseJsonArray(
+			context,
+			context.getNodeParameter('payloadCustomFieldDependencies', itemIndex, '[]'),
+			'Affected Records',
+			itemIndex,
 		);
-		const response = await client.request<IDataObject>(
-			'PATCH',
-			`/custom-fields/groups/${groupId}`,
-			sanitizeCustomFieldGroupBody(context, body, false, itemIndex),
+		command = deleteCommand(
+			[
+				customFieldDeleteItem(
+					{
+						id: targetId(),
+						expectedVersion: nodeVersion(context, itemIndex),
+						[dependencyKey]: dependencies as IDataObject[],
+					},
+					dependencyKey,
+				),
+			],
+			context.getNodeParameter('force', itemIndex, false),
 		);
-		pushResponse(returnData, response, itemIndex);
-		return;
+		action = '/delete';
+	} else {
+		const body = buildCustomFieldBodyPayload(context, itemIndex, operation);
+		if (operation === 'createGroup' || operation === 'createDefinition') {
+			command = createCommand(
+				group
+					? sanitizeCustomFieldGroupBody(context, body, true, itemIndex)
+					: sanitizeCustomFieldDefinitionBody(context, body, 'create', itemIndex),
+			);
+			action = '';
+		} else if (operation === 'updateGroup' || operation === 'updateDefinition') {
+			const { version, ...fields } = body;
+			const changes = group
+				? sanitizeCustomFieldGroupBody(context, fields, false, itemIndex)
+				: sanitizeCustomFieldDefinitionBody(context, fields, 'update', itemIndex);
+			command = {
+				items: [
+					{ id: targetId(), expectedVersion: nodeVersion(context, itemIndex, version), changes },
+				],
+			};
+			action = '/update';
+		} else if (operation === 'bulkUpdateDefinitions') {
+			command = {
+				items: commandItems(body.items).map((item) => {
+					validateTarget(item);
+					return {
+						id: item.id,
+						expectedVersion: item.expectedVersion,
+						changes: sanitizeCustomFieldDefinitionBody(
+							context,
+							(item.changes as IDataObject) ?? {},
+							'update',
+							itemIndex,
+						),
+					};
+				}),
+			};
+			action = '/update';
+		} else if (operation === 'bulkDeleteDefinitions') {
+			command = deleteCommand(
+				commandItems(body.items).map((item) => customFieldDeleteItem(item, 'affectedEntities')),
+				body.force,
+			);
+			action = '/delete';
+		} else {
+			throw new NodeOperationError(
+				context.getNode(),
+				`Unsupported Custom Field operation: ${operation}`,
+			);
+		}
 	}
-
-	if (operation === 'createDefinition') {
-		const response = await client.request<IDataObject>(
-			'POST',
-			'/custom-fields/definitions',
-			sanitizeCustomFieldDefinitionBody(context, body, 'create', itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'updateDefinition') {
-		const definitionId = safePathSegment(
-			context.getNodeParameter('customFieldDefinitionId', itemIndex) as string,
-			'Custom field definition ID',
-		);
-		const response = await client.request<IDataObject>(
-			'PATCH',
-			`/custom-fields/definitions/${definitionId}`,
-			sanitizeCustomFieldDefinitionBody(context, body, 'update', itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'bulkUpdateDefinitions') {
-		const response = await client.request<IDataObject>(
-			'PATCH',
-			'/custom-fields/definitions/bulk',
-			sanitizeCustomFieldDefinitionBulkUpdate(context, body, itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	if (operation === 'bulkDeleteDefinitions') {
-		const response = await client.request<IDataObject>(
-			'POST',
-			'/custom-fields/definitions/bulk-delete',
-			sanitizeCustomFieldDefinitionBulkDelete(context, body, itemIndex),
-		);
-		pushResponse(returnData, response, itemIndex);
-		return;
-	}
-
-	throw new NodeOperationError(
-		context.getNode(),
-		`Unsupported Custom Field operation: ${operation}`,
-		{ itemIndex },
-	);
+	const client = await createHustleOpsApiClient(context, itemIndex);
+	pushResponse(returnData, await client.request('POST', `${path}${action}`, command), itemIndex);
 }
 
 export class HustleOps implements INodeType {
@@ -1617,19 +1629,6 @@ export class HustleOps implements INodeType {
 				type: 'options',
 				noDataExpression: true,
 				default: 'list',
-				options: COMMENT_OPERATION_OPTIONS,
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-					},
-				},
-			},
-			{
-				displayName: 'Operation',
-				name: 'operation',
-				type: 'options',
-				noDataExpression: true,
-				default: 'list',
 				options: TAG_OPERATION_OPTIONS,
 				displayOptions: {
 					show: {
@@ -1665,14 +1664,89 @@ export class HustleOps implements INodeType {
 				},
 			},
 			{
+				displayName: 'ID',
+				name: 'id',
+				type: 'string',
+				default: '',
+				required: true,
+				description: 'HustleOps object ID',
+				displayOptions: modeDisplayOptions(
+					CORE_RESOURCE_VALUES,
+					['update'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
+				),
+			},
+			{
+				displayName: 'ID',
+				name: 'id',
+				type: 'string',
+				default: '',
+				description:
+					'Record ID for a flat update object. The command envelope provides its own target IDs.',
+				displayOptions: modeDisplayOptions(
+					CORE_RESOURCE_VALUES,
+					['update'],
+					PAYLOAD_MODE_JSON_OBJECT,
+				),
+			},
+			{
+				displayName: 'Expected Version',
+				name: 'expectedVersion',
+				type: 'number',
+				default: -1,
+				required: true,
+				description:
+					'Version from the record read. Enter 0 for a newly created record at version 0.',
+				displayOptions: {
+					show: {
+						resource: CORE_RESOURCE_VALUES,
+						operation: ['update', 'setTags', 'addTags', 'removeTag'],
+					},
+				},
+			},
+			{
+				displayName: 'Expected Version',
+				name: 'expectedVersion',
+				type: 'number',
+				default: -1,
+				required: true,
+				description: 'Version from the corresponding HustleOps read',
+				displayOptions: {
+					show: {
+						resource: ['tag', 'customField'],
+						operation: [
+							'updateColor',
+							'updateGroup',
+							'updateDefinition',
+							'deleteGroup',
+							'deleteDefinition',
+							'replaceValues',
+						],
+					},
+				},
+			},
+			{
 				displayName: 'Input Mode',
 				name: PAYLOAD_INPUT_MODE_PARAMETER,
 				type: 'options',
 				default: PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 				options: [...PAYLOAD_INPUT_MODE_OPTIONS],
 				displayOptions: payloadModeDisplayOptions(
-					[...CORE_RESOURCE_VALUES, 'comment', 'tag', 'customField'],
+					[...CORE_RESOURCE_VALUES, 'tag', 'customField'],
 					PAYLOAD_OPERATION_VALUES,
+				),
+			},
+			{
+				displayName: 'Command References',
+				name: 'payloadCommandReferences',
+				type: 'json',
+				default: '{}',
+				description:
+					'Versioned incident or assignee membership references required by the selected change',
+				displayOptions: modeDisplayOptions(
+					['alert', 'incident'],
+					['create', 'update'],
+					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 				),
 			},
 			...CORE_CREATE_REQUIRED_PROPERTIES,
@@ -1684,7 +1758,7 @@ export class HustleOps implements INodeType {
 				name: 'payloadSearchFilter',
 				type: 'json',
 				default: '{}',
-				description: 'Optional search filter object. Leave {} to omit the filter.',
+				description: 'Collection filter with optional query and expression. Leave {} to omit it.',
 				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
 			},
 			{
@@ -1741,14 +1815,6 @@ export class HustleOps implements INodeType {
 				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
 			},
 			{
-				displayName: 'Exclude IDs',
-				name: 'payloadSearchExcludeIds',
-				type: 'json',
-				default: '[]',
-				description: 'Optional JSON array of entity UUIDs to exclude from search results',
-				displayOptions: SEARCH_FIELD_DISPLAY_OPTIONS,
-			},
-			{
 				displayName: 'Return All',
 				name: 'returnAll',
 				type: 'boolean',
@@ -1801,7 +1867,7 @@ export class HustleOps implements INodeType {
 				type: 'boolean',
 				default: false,
 				description:
-					'Whether Search should return the raw paginated response with data, total, page, pageSize, and totalPages instead of only data rows',
+					'Whether Search should return the raw paginated response with data, page, limit, itemsTotal, filteredCount, and totalPages instead of only data rows',
 				displayOptions: {
 					show: {
 						resource: CORE_RESOURCE_VALUES,
@@ -1815,8 +1881,7 @@ export class HustleOps implements INodeType {
 				name: 'withCounts',
 				type: 'boolean',
 				default: false,
-				description:
-					'Whether to request tag usage counts. Counts require the HustleOps Admin role.',
+				description: 'Whether to include usage counts for each tag',
 				displayOptions: {
 					show: {
 						resource: ['tag'],
@@ -1853,16 +1918,17 @@ export class HustleOps implements INodeType {
 				description: 'Optional tag color',
 				displayOptions: modeDisplayOptions(
 					['tag'],
-					['create', 'updateColor', 'bulkUpdateColor'],
+					['create', 'updateColor'],
 					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 				),
 			},
 			{
-				displayName: 'Tag IDs',
-				name: 'payloadTagIds',
+				displayName: 'Command Items',
+				name: 'payloadTagItems',
 				type: 'json',
 				default: '[]',
-				description: 'JSON array of tag UUIDs',
+				description:
+					'JSON array of versioned tag targets. Updates need changes.color. Deletes need expectedUsageCounts and affectedRecords.',
 				displayOptions: modeDisplayOptions(
 					['tag'],
 					['bulkUpdateColor', 'bulkDelete'],
@@ -1891,8 +1957,28 @@ export class HustleOps implements INodeType {
 				displayOptions: {
 					show: {
 						resource: [...CORE_RESOURCE_VALUES, 'tag'],
-						operation: ['updateColor', 'delete', 'removeTag'],
+						operation: ['updateColor', 'delete', 'getDeletionImpact', 'removeTag'],
 					},
+				},
+			},
+			{
+				displayName: 'Deletion Impact',
+				name: 'payloadTagDeletionImpact',
+				type: 'json',
+				default: '{}',
+				required: true,
+				description: 'Reviewed response from Get Deletion Impact for the selected tag',
+				displayOptions: { show: { resource: ['tag'], operation: ['delete'] } },
+			},
+			{
+				displayName: 'Affected Records',
+				name: 'payloadCustomFieldDependencies',
+				type: 'json',
+				default: '[]',
+				description:
+					'Reviewed dependencies with an ID and expected version. Definitions also require the entity type for each record.',
+				displayOptions: {
+					show: { resource: ['customField'], operation: ['deleteGroup', 'deleteDefinition'] },
 				},
 			},
 			{
@@ -1900,7 +1986,7 @@ export class HustleOps implements INodeType {
 				name: 'force',
 				type: 'boolean',
 				default: false,
-				description: 'Whether to force deletion. Single deletes send force as a query parameter.',
+				description: 'Whether to allow deletion with the reviewed dependencies still in use',
 				displayOptions: {
 					show: {
 						resource: ['tag', 'customField'],
@@ -1933,26 +2019,15 @@ export class HustleOps implements INodeType {
 				),
 			},
 			{
-				displayName: 'Custom Field Definition Bulk Fields',
-				name: 'payloadCustomFieldDefinitionBulkFields',
-				type: 'json',
-				default: '{}',
-				description: 'Custom field definition bulk update fields as a JSON object',
-				displayOptions: modeDisplayOptions(
-					['customField'],
-					['bulkUpdateDefinitions'],
-					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
-				),
-			},
-			{
-				displayName: 'Custom Field Definition IDs',
-				name: 'payloadCustomFieldDefinitionIds',
+				displayName: 'Command Items',
+				name: 'payloadCustomFieldItems',
 				type: 'json',
 				default: '[]',
-				description: 'JSON array of custom field definition UUIDs',
+				description:
+					'JSON array of versioned definition targets with changes for updates or affectedEntities for deletion',
 				displayOptions: modeDisplayOptions(
 					['customField'],
-					['bulkDeleteDefinitions'],
+					['bulkUpdateDefinitions', 'bulkDeleteDefinitions'],
 					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 				),
 			},
@@ -2004,7 +2079,7 @@ export class HustleOps implements INodeType {
 				displayOptions: {
 					show: {
 						resource: ['customField'],
-						operation: ['updateGroup', 'deleteGroup'],
+						operation: ['updateGroup', 'deleteGroup', 'getGroupDependencies'],
 					},
 				},
 			},
@@ -2022,7 +2097,7 @@ export class HustleOps implements INodeType {
 				displayOptions: {
 					show: {
 						resource: ['customField'],
-						operation: ['updateDefinition', 'deleteDefinition'],
+						operation: ['updateDefinition', 'deleteDefinition', 'getDefinitionDependencies'],
 					},
 				},
 			},
@@ -2032,17 +2107,12 @@ export class HustleOps implements INodeType {
 				type: 'options',
 				default: 'INCIDENT',
 				required: true,
-				description: 'Type of HustleOps entity for the comment or custom field operation',
-				options: COMMENT_ENTITY_TYPE_OPTIONS,
+				description: 'Type of HustleOps entity for the custom field operation',
+				options: CUSTOM_FIELD_ENTITY_TYPE_OPTIONS,
 				displayOptions: {
 					show: {
-						resource: ['comment', 'customField'],
+						resource: ['customField'],
 						operation: [
-							'list',
-							'search',
-							'unreadCount',
-							'create',
-							'markRead',
 							'getValues',
 							'getAvailable',
 							'batchGetValues',
@@ -2058,148 +2128,11 @@ export class HustleOps implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				description: 'HustleOps entity UUID for the comment or custom field operation',
+				description: 'HustleOps entity UUID for the custom field operation',
 				displayOptions: {
 					show: {
-						resource: ['comment', 'customField'],
-						operation: [
-							'list',
-							'search',
-							'unreadCount',
-							'create',
-							'markRead',
-							'getValues',
-							'getAvailable',
-							'replaceValues',
-							'updateSelectedValuesSafely',
-						],
-					},
-				},
-			},
-			{
-				displayName: 'Comment ID',
-				name: 'commentId',
-				type: 'string',
-				default: '',
-				required: true,
-				description: 'Comment UUID',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['update', 'delete', 'toggleReaction', 'togglePin'],
-					},
-				},
-			},
-			{
-				displayName: 'Take',
-				name: 'take',
-				type: 'number',
-				typeOptions: {
-					minValue: 1,
-					maxValue: 100,
-				},
-				default: 50,
-				description: 'Number of comments to request, from 1 to 100',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['list'],
-					},
-				},
-			},
-			{
-				displayName: 'Cursor',
-				name: 'cursor',
-				type: 'string',
-				default: '',
-				description:
-					'Optional comment UUID cursor returned as nextCursor by a previous list response',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['list'],
-					},
-				},
-			},
-			{
-				displayName: 'Search Query',
-				name: 'q',
-				type: 'string',
-				default: '',
-				required: true,
-				description:
-					'Text to search for within the entity comment thread. Keep search text at or below 500 characters.',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['search'],
-					},
-				},
-			},
-			{
-				displayName: 'Max Results',
-				name: 'maxResults',
-				type: 'number',
-				typeOptions: {
-					minValue: 1,
-					maxValue: 100,
-				},
-				default: 100,
-				description: 'Maximum number of comment search results to emit',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['search'],
-					},
-				},
-			},
-			{
-				displayName: 'Content',
-				name: 'payloadCommentContent',
-				type: 'string',
-				default: '',
-				displayOptions: modeDisplayOptions(
-					['comment'],
-					['create', 'update'],
-					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
-				),
-			},
-			{
-				displayName: 'Parent ID',
-				name: 'payloadCommentParentId',
-				type: 'string',
-				default: '',
-				displayOptions: modeDisplayOptions(['comment'], ['create'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
-			},
-			{
-				displayName: 'Attachment IDs',
-				name: 'payloadCommentAttachmentIds',
-				type: 'json',
-				default: '[]',
-				displayOptions: modeDisplayOptions(['comment'], ['create'], PAYLOAD_MODE_INDIVIDUAL_FIELDS),
-			},
-			{
-				displayName: 'Emoji',
-				name: 'payloadCommentEmoji',
-				type: 'string',
-				default: '',
-				displayOptions: modeDisplayOptions(
-					['comment'],
-					['toggleReaction'],
-					PAYLOAD_MODE_INDIVIDUAL_FIELDS,
-				),
-			},
-			{
-				displayName: 'Include Cursor Metadata',
-				name: 'includeCommentPaginationMetadata',
-				type: 'boolean',
-				default: false,
-				description:
-					'Whether List should return the raw response with items and nextCursor instead of one output item per comment',
-				displayOptions: {
-					show: {
-						resource: ['comment'],
-						operation: ['list'],
+						resource: ['customField'],
+						operation: ['getValues', 'getAvailable', 'replaceValues', 'updateSelectedValuesSafely'],
 					},
 				},
 			},
@@ -2228,12 +2161,12 @@ export class HustleOps implements INodeType {
 		},
 		loadOptions: {
 			async getTagOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return loadOptionsFromPath(this, '/tags', 'Tag');
+				return loadOptionsFromPath(this, '/tags/auxiliary/list', 'Tag');
 			},
 			async getCustomFieldDefinitionOptions(
 				this: ILoadOptionsFunctions,
 			): Promise<INodePropertyOptions[]> {
-				return loadOptionsFromPath(this, '/custom-fields/definitions', 'Custom Field');
+				return loadOptionsFromPath(this, '/custom-fields', 'Custom Field');
 			},
 			async getAlertTypeOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				return loadPicklistOptions(this, 'alertType', 'Alert Type');
@@ -2271,13 +2204,14 @@ export class HustleOps implements INodeType {
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
 			try {
 				const resource = this.getNodeParameter('resource', itemIndex) as HustleOpsResource;
-				const operation = this.getNodeParameter('operation', itemIndex) as
-					| HustleOpsOperation
-					| CommentOperation;
+				const operation = this.getNodeParameter('operation', itemIndex) as HustleOpsOperation;
 
 				if (resource === 'comment') {
-					await executeCommentOperation(this, itemIndex, operation as CommentOperation, returnData);
-					continue;
+					throw new NodeOperationError(
+						this.getNode(),
+						'HustleOps removed the Comment API. Select a supported resource for this node.',
+						{ itemIndex },
+					);
 				}
 
 				if (resource === 'tag') {
@@ -2321,39 +2255,33 @@ export class HustleOps implements INodeType {
 					continue;
 				}
 
-				if (coreOperation === 'create') {
-					const body = buildCoreDtoBody(this, itemIndex, definition, 'create');
+				if (coreOperation === 'create' || coreOperation === 'update') {
+					const body = buildCoreCommand(this, itemIndex, definition, coreOperation);
 					const client = await createHustleOpsApiClient(this, itemIndex);
-					const response = await client.request<IDataObject>('POST', definition.path, body);
-					returnData.push({ json: response, pairedItem: { item: itemIndex } });
-					continue;
-				}
-
-				if (coreOperation === 'update') {
-					const id = this.getNodeParameter('id', itemIndex) as string;
-					const entityId = safePathSegment(id, `${definition.displayName} ID`);
-					const body = buildCoreDtoBody(this, itemIndex, definition, 'update');
-					const client = await createHustleOpsApiClient(this, itemIndex);
-					const response = await client.request<IDataObject>(
-						'PATCH',
-						`${definition.path}/${entityId}`,
-						body,
-					);
-					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					const path = coreOperation === 'create' ? definition.path : `${definition.path}/update`;
+					pushResponse(returnData, await client.request('POST', path, body), itemIndex);
 					continue;
 				}
 
 				const searchRequestBody = buildCoreSearchBody(this, itemIndex, definition, coreOperation);
-
+				const searchPath = `${definition.path}/search`;
 				const client = await createHustleOpsApiClient(this, itemIndex);
 
 				if (coreOperation === 'count') {
-					const response = await client.request<IDataObject>(
-						'POST',
-						`${definition.path}/count`,
-						searchRequestBody,
-					);
-					returnData.push({ json: response, pairedItem: { item: itemIndex } });
+					const response = await client.request('POST', searchPath, {
+						filter: searchRequestBody.filter,
+						fields: 'none',
+						include: ['filteredCount'],
+					});
+					const count = response.filteredCount;
+					if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Search response is missing the requested filtered count.',
+							{ itemIndex },
+						);
+					}
+					pushResponse(returnData, { count }, itemIndex);
 					continue;
 				}
 
@@ -2372,7 +2300,7 @@ export class HustleOps implements INodeType {
 						itemIndex,
 					);
 					await client.requestEachPage(
-						`${definition.path}/search`,
+						searchPath,
 						searchRequestBody,
 						{ maxItems, maxPages },
 						(row) => returnData.push({ json: row, pairedItem: { item: itemIndex } }),
@@ -2380,16 +2308,20 @@ export class HustleOps implements INodeType {
 					continue;
 				}
 
-				const response = assertPaginatedResponse(
-					await client.request('POST', `${definition.path}/search`, searchRequestBody),
-					`${definition.displayName} search response`,
-				);
-
 				const includePaginationMetadata = this.getNodeParameter(
 					'includePaginationMetadata',
 					itemIndex,
 					false,
 				) as boolean;
+				const body =
+					includePaginationMetadata && searchRequestBody.include === undefined
+						? { ...searchRequestBody, include: ['itemsTotal', 'filteredCount'] }
+						: searchRequestBody;
+				const response = assertPaginatedResponse(
+					await client.request('POST', searchPath, body),
+					`${definition.displayName} search response`,
+				);
+
 				if (includePaginationMetadata) {
 					returnData.push({ json: response, pairedItem: { item: itemIndex } });
 					continue;

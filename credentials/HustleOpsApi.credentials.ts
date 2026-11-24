@@ -24,6 +24,14 @@ export class HustleOpsApi implements ICredentialType {
 			description: 'Full HTTPS HustleOps instance URL. Use HTTP only for local development.',
 		},
 		{
+			displayName: 'Organization ID',
+			name: 'organizationId',
+			type: 'string',
+			default: '',
+			required: true,
+			description: 'UUID of the HustleOps organization to target with this credential',
+		},
+		{
 			displayName: 'API Key',
 			name: 'apiKey',
 			type: 'string',
@@ -48,6 +56,7 @@ export class HustleOpsApi implements ICredentialType {
 		properties: {
 			headers: {
 				[HUSTLEOPS_API_KEY_HEADER]: '={{$credentials.apiKey}}',
+				'X-Organization-Id': '={{$credentials.organizationId}}',
 			},
 		},
 	};

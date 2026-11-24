@@ -67,6 +67,7 @@ test('hustleOpsApiRequest sends x-api-key, JSON headers, normalized URL, and req
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async (options) => {
@@ -91,7 +92,8 @@ test('hustleOpsApiRequest sends x-api-key, JSON headers, normalized URL, and req
 	assert.equal(calls[0].headers['x-api-key'], 'fixture-api-key');
 	assert.equal(calls[0].headers.Accept, 'application/json');
 	assert.equal(calls[0].headers['Content-Type'], 'application/json');
-	assert.match(calls[0].headers['x-request-id'], /^hustleops-n8n-/);
+	assert.match(calls[0].headers['x-request-id'], /^[0-9a-f-]{36}$/);
+	assert.equal(calls[0].headers['X-Organization-Id'], 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 	assert.deepEqual(calls[0].body, {});
 	assert.equal(calls[0].json, true);
 	assert.equal(calls[0].skipSslCertificateValidation, undefined);
@@ -105,6 +107,7 @@ test('hustleOpsApiRequest can skip SSL certificate validation when credentials a
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 			ignoreSslIssues: true,
 		}),
 		helpers: {
@@ -129,6 +132,7 @@ test('hustleOpsApiRequest maps HustleOps error bodies into node errors', async (
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async () => {
@@ -160,6 +164,7 @@ test('hustleOpsApiRequest maps stringified HustleOps error bodies into node erro
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async () => {
@@ -191,6 +196,7 @@ test('hustleOpsApiRequest maps response data error bodies into node errors', asy
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async () => {
@@ -222,6 +228,7 @@ test('hustleOpsApiRequest redacts secrets from surfaced errors', async () => {
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async () => {
@@ -259,6 +266,7 @@ test('hustleOpsApiRequest appends encoded query parameters and omits empty value
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async (options) => {
@@ -292,6 +300,7 @@ test('hustleOpsApiRequest redacts query strings from surfaced API errors', async
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async () => {
@@ -350,15 +359,16 @@ test('hustleOpsApiRequestEachPage streams pages and honors maxItems', async () =
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async (options) => {
-				calls.push(options.body.pagination.page);
+				calls.push(options.body.page);
 				return {
-					data: [{ page: options.body.pagination.page }],
-					total: 3,
-					page: options.body.pagination.page,
-					pageSize: 1,
+					data: [{ page: options.body.page }],
+					filteredCount: 3,
+					page: options.body.page,
+					limit: 1,
 					totalPages: 3,
 				};
 			},
@@ -369,7 +379,9 @@ test('hustleOpsApiRequestEachPage streams pages and honors maxItems', async () =
 		context,
 		'/alerts/search',
 		{
-			pagination: { page: 1, pageSize: 1, sortBy: 'detectedAt', sortOrder: 'desc' },
+			page: 1,
+			limit: 1,
+			sort: '-detectedAt',
 		},
 		0,
 		{ maxItems: 2 },
@@ -386,20 +398,16 @@ test('assertPaginatedResponse rejects malformed paginated responses', () => {
 	const { assertPaginatedResponse } = loadHelpers();
 
 	assert.throws(
-		() =>
-			assertPaginatedResponse(
-				{ data: {}, total: 1, page: 1, pageSize: 25, totalPages: 1 },
-				'Alert search response',
-			),
+		() => assertPaginatedResponse({ data: {}, page: 1, limit: 25 }, 'Alert search response'),
 		/Alert search response must include a data array/,
 	);
 	assert.throws(
 		() =>
 			assertPaginatedResponse(
-				{ data: [], total: 1, page: 1, pageSize: 25 },
+				{ data: [], page: 1, limit: 25, totalPages: 'invalid' },
 				'Alert search response',
 			),
-		/Alert search response must include integer totalPages/,
+		/Alert search response must include a valid integer totalPages/,
 	);
 });
 
@@ -568,66 +576,34 @@ test('sanitizeDtoBody accepts all API-supported severity and TLP enum values', (
 	);
 });
 
-test('buildSearchRequest defaults pagination and validates sort fields', () => {
+test('buildCollectionRequest translates legacy pagination and filters into current selectors', () => {
 	const {
 		CORE_RESOURCE_DEFINITIONS,
-		buildSearchRequest,
+		buildCollectionRequest,
 	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
+	const definition = CORE_RESOURCE_DEFINITIONS.incident;
+	const expression = {
+		operator: 'AND',
+		groups: [
+			{ operator: 'AND', conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }] },
+		],
+	};
 
-	assert.deepEqual(buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {}), {
-		pagination: {
-			page: 1,
-			pageSize: 25,
-			sortBy: 'detectedAt',
-			sortOrder: 'desc',
-		},
-	});
-
+	assert.deepEqual(buildCollectionRequest(definition, {}), {});
 	assert.deepEqual(
-		buildSearchRequest(CORE_RESOURCE_DEFINITIONS.incident, {
-			filter: {
-				operator: 'AND',
-				groups: [
-					{
-						operator: 'AND',
-						conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }],
-					},
-				],
-			},
-			pagination: { sortBy: 'createdAt', sortOrder: 'asc' },
+		buildCollectionRequest(definition, {
+			filter: expression,
+			pagination: { page: 2, pageSize: 25, sortBy: 'createdAt', sortOrder: 'desc' },
 		}),
-		{
-			filter: {
-				operator: 'AND',
-				groups: [
-					{
-						operator: 'AND',
-						conditions: [{ field: 'severity', operator: 'eq', value: 'HIGH' }],
-					},
-				],
-			},
-			pagination: {
-				page: 1,
-				pageSize: 25,
-				sortBy: 'createdAt',
-				sortOrder: 'asc',
-			},
-		},
+		{ filter: { expression }, page: 2, limit: 25, sort: '-createdAt' },
 	);
-
-	assert.equal(
-		buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
-			pagination: { sortBy: 'displayId' },
-		}).pagination.sortBy,
-		'displayId',
-	);
-
-	assert.throws(
-		() =>
-			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.knowledge, {
-				pagination: { sortBy: 'severity' },
-			}),
-		/Unsupported Knowledge search sort field: severity/,
+	assert.deepEqual(
+		buildCollectionRequest(definition, {
+			filter: { query: 'incident' },
+			fields: ['id', 'version'],
+			include: ['filteredCount'],
+		}),
+		{ filter: { query: 'incident' }, fields: ['id', 'version'], include: ['filteredCount'] },
 	);
 });
 
@@ -673,23 +649,23 @@ test('sanitizeDtoBody enforces required create fields and rejects empty updates'
 	);
 });
 
-test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and unsafe filter size', () => {
+test('buildCollectionRequest rejects unknown top-level keys, invalid pagination, and unsafe filter size', () => {
 	const {
 		CORE_RESOURCE_DEFINITIONS,
-		buildSearchRequest,
+		buildCollectionRequest,
 	} = require('../dist/nodes/HustleOps/resourceDefinitions.js');
 
 	assert.throws(
-		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, { where: {} }),
-		/Unsupported Alert search request field: where/,
+		() => buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, { where: {} }),
+		/Unsupported Alert collection request field: where/,
 	);
 	assert.throws(
-		() => buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, { pagination: { page: 0 } }),
-		/Alert search pagination.page must be between 1 and 10000/,
+		() => buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, { pagination: { page: 0 } }),
+		/Collection page must be an integer between 1 and 10000/,
 	);
 	assert.throws(
 		() =>
-			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+			buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, {
 				filter: {
 					operator: 'AND',
 					groups: new Array(21).fill({
@@ -702,14 +678,14 @@ test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and
 	);
 	assert.throws(
 		() =>
-			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+			buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, {
 				filter: { operator: 'AND', groups: [] },
 			}),
 		/Alert search filter must contain at least one group/,
 	);
 	assert.throws(
 		() =>
-			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+			buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, {
 				filter: {
 					operator: 'AND',
 					groups: [
@@ -724,7 +700,7 @@ test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and
 	);
 	assert.throws(
 		() =>
-			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+			buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, {
 				filter: {
 					operator: 'AND',
 					groups: [
@@ -739,139 +715,10 @@ test('buildSearchRequest rejects unknown top-level keys, invalid pagination, and
 	);
 	assert.throws(
 		() =>
-			buildSearchRequest(CORE_RESOURCE_DEFINITIONS.alert, {
+			buildCollectionRequest(CORE_RESOURCE_DEFINITIONS.alert, {
 				excludeIds: ['../users'],
 			}),
-		/Alert search excludeIds must contain valid UUIDs/,
-	);
-});
-
-test('comment helpers build entity queries and sanitize comment bodies', () => {
-	const {
-		buildCommentEntityQuery,
-		buildCommentSearchQuery,
-		parseCommentMaxResults,
-		sanitizeCreateComment,
-		sanitizeUpdateComment,
-		sanitizeToggleReaction,
-	} = require('../dist/nodes/HustleOps/commentDefinitions.js');
-	const context = { getNode: () => ({ name: 'HustleOps' }) };
-	const entityId = '11111111-1111-4111-8111-111111111111';
-	const parentId = '22222222-2222-4222-8222-222222222222';
-	const attachmentId = '33333333-3333-4333-8333-333333333333';
-
-	assert.deepEqual(
-		buildCommentEntityQuery(
-			context,
-			{ entityType: 'ALERT', entityId, take: 25, cursor: parentId },
-			0,
-		),
-		{ entityType: 'ALERT', entityId, take: 25, cursor: parentId },
-	);
-
-	assert.deepEqual(
-		sanitizeCreateComment(
-			context,
-			{
-				entityType: 'INCIDENT',
-				entityId,
-			},
-			{
-				content: 'Escalating for review',
-				parentId,
-				attachmentIds: [attachmentId],
-			},
-			0,
-		),
-		{
-			entityType: 'INCIDENT',
-			entityId,
-			content: 'Escalating for review',
-			parentId,
-			attachmentIds: [attachmentId],
-		},
-	);
-
-	assert.deepEqual(sanitizeUpdateComment(context, { content: 'Updated note' }, 0), {
-		content: 'Updated note',
-	});
-	assert.deepEqual(sanitizeToggleReaction(context, { emoji: 'OK' }, 0), { emoji: 'OK' });
-	assert.deepEqual(
-		buildCommentSearchQuery(context, { entityType: 'INCIDENT', entityId, q: 'timeline' }, 0),
-		{ entityType: 'INCIDENT', entityId, q: 'timeline' },
-	);
-	assert.equal(parseCommentMaxResults(context, 25, 0), 25);
-});
-
-test('comment helpers reject invalid comment inputs before requests', () => {
-	const {
-		buildCommentEntityQuery,
-		buildCommentSearchQuery,
-		sanitizeCreateComment,
-		sanitizeUpdateComment,
-		sanitizeToggleReaction,
-	} = require('../dist/nodes/HustleOps/commentDefinitions.js');
-	const context = { getNode: () => ({ name: 'HustleOps' }) };
-	const entityId = '11111111-1111-4111-8111-111111111111';
-
-	assert.throws(
-		() => buildCommentEntityQuery(context, { entityType: 'USER', entityId }, 0),
-		/Comment entity type must be one of: ALERT, INCIDENT, OBSERVABLE, KNOWLEDGE/,
-	);
-	assert.throws(
-		() => buildCommentEntityQuery(context, { entityType: 'ALERT', entityId, take: 101 }, 0),
-		/Comment take must be between 1 and 100/,
-	);
-	assert.throws(
-		() => sanitizeCreateComment(context, { entityType: 'ALERT', entityId }, {}, 0),
-		/Comment create requires content or attachmentIds/,
-	);
-	assert.throws(
-		() =>
-			sanitizeCreateComment(
-				context,
-				{
-					entityType: 'ALERT',
-					entityId,
-				},
-				{
-					attachmentIds: [
-						'11111111-1111-4111-8111-111111111111',
-						'22222222-2222-4222-8222-222222222222',
-						'33333333-3333-4333-8333-333333333333',
-						'44444444-4444-4444-8444-444444444444',
-					],
-				},
-				0,
-			),
-		/Comment attachmentIds cannot contain more than 3 IDs/,
-	);
-	assert.throws(
-		() => sanitizeUpdateComment(context, { content: '' }, 0),
-		/Comment content is required/,
-	);
-	assert.throws(
-		() => sanitizeToggleReaction(context, { emoji: '12345678901234567' }, 0),
-		/Comment emoji cannot exceed 16 characters/,
-	);
-	assert.throws(
-		() =>
-			sanitizeCreateComment(
-				context,
-				{ entityType: 'ALERT', entityId },
-				{ content: 'x', userId: 'u1' },
-				0,
-			),
-		/Unsupported Comment create body field: userId/,
-	);
-	assert.throws(
-		() => sanitizeUpdateComment(context, { content: 'x', entityId }, 0),
-		/Unsupported Comment update field: entityId/,
-	);
-	assert.throws(
-		() =>
-			buildCommentSearchQuery(context, { entityType: 'ALERT', entityId, q: 'x'.repeat(501) }, 0),
-		/Comment search query cannot exceed 500 characters/,
+		/no longer supports Exclude IDs/,
 	);
 });
 
@@ -896,6 +743,7 @@ test('credential test reports authenticated endpoint failures without leaking th
 		testHustleOpsApiCredentials(context, {
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		(error) => {
 			assert.match(error.message, /HustleOps API error 401/);
@@ -921,11 +769,12 @@ test('credential test can skip SSL certificate validation when credentials allow
 	await testHustleOpsApiCredentials(context, {
 		baseUrl: 'https://hustleops.example.com',
 		apiKey: 'fixture-api-key',
+		organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		ignoreSslIssues: true,
 	});
 
 	assert.equal(calls.length, 1);
-	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/tags');
+	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/tags/auxiliary/list?limit=1');
 	assert.equal(calls[0].skipSslCertificateValidation, true);
 });
 
@@ -944,48 +793,29 @@ test('credential test can use legacy request helper when httpRequest is unavaila
 	await testHustleOpsApiCredentials(context, {
 		baseUrl: 'https://hustleops.example.com',
 		apiKey: 'fixture-api-key',
+		organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 	});
 
-	assert.deepEqual(calls, ['https://hustleops.example.com/api/v1/tags']);
+	assert.deepEqual(calls, ['https://hustleops.example.com/api/v1/tags/auxiliary/list?limit=1']);
 });
 
-test('buildGenericSearchRequest validates non-core search definitions', () => {
-	const { buildGenericSearchRequest } = require('../dist/nodes/HustleOps/resourceDefinitions.js');
-	const definition = {
-		displayName: 'Tag',
-		defaultSortBy: 'value',
-		defaultSortOrder: 'asc',
-		searchFields: ['value', 'color', 'createdAt', 'updatedAt'],
-		sortFields: ['value', 'createdAt', 'updatedAt'],
-	};
-
-	assert.deepEqual(buildGenericSearchRequest(definition, {}), {
-		pagination: {
-			page: 1,
-			pageSize: 25,
-			sortBy: 'value',
-			sortOrder: 'asc',
-		},
+test('collection query serialization encodes only supported query controls', () => {
+	const { collectionQueryParams } = loadHelpers();
+	const filter = { query: 'tier & status' };
+	const query = collectionQueryParams({
+		page: 2,
+		limit: 10,
+		sort: '-value',
+		fields: ['id', 'version'],
+		include: ['itemsTotal', 'filteredCount'],
+		filter,
 	});
-
-	assert.throws(
-		() => buildGenericSearchRequest(definition, { pagination: { sortBy: 'name' } }),
-		/Unsupported Tag search sort field: name/,
-	);
-
-	assert.throws(
-		() =>
-			buildGenericSearchRequest(definition, {
-				filter: {
-					operator: 'AND',
-					groups: [
-						{
-							operator: 'AND',
-							conditions: [{ field: 'name', operator: 'eq', value: 'vip' }],
-						},
-					],
-				},
-			}),
-		/Unsupported Tag search field: name/,
-	);
+	assert.deepEqual(query, {
+		page: 2,
+		limit: 10,
+		sort: '-value',
+		fields: 'id,version',
+		include: 'itemsTotal,filteredCount',
+		filter: JSON.stringify(filter),
+	});
 });
