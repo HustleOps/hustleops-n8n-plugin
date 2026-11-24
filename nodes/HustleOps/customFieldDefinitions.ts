@@ -8,12 +8,14 @@ export type CustomFieldOperation =
 	| 'createGroup'
 	| 'updateGroup'
 	| 'deleteGroup'
+	| 'getGroupDependencies'
 	| 'listDefinitions'
 	| 'searchDefinitions'
 	| 'createDefinition'
 	| 'updateDefinition'
 	| 'bulkUpdateDefinitions'
 	| 'deleteDefinition'
+	| 'getDefinitionDependencies'
 	| 'bulkDeleteDefinitions'
 	| 'getValues'
 	| 'getAvailable'
@@ -89,19 +91,25 @@ export const CUSTOM_FIELD_OPERATION_OPTIONS: INodePropertyOptions[] = [
 	{
 		name: 'Create Group',
 		value: 'createGroup',
-		description: 'Create a custom field group. Requires Admin.',
+		description: 'Create a custom field group. Requires Custom Fields Update.',
 		action: 'Create a custom field group',
 	},
 	{
 		name: 'Update Group',
 		value: 'updateGroup',
-		description: 'Update a custom field group. Requires Admin.',
+		description: 'Update a custom field group. Requires Custom Fields Update.',
 		action: 'Update a custom field group',
+	},
+	{
+		name: 'Get Group Dependencies',
+		value: 'getGroupDependencies',
+		description: 'Read the group version and dependency records for review before deletion',
+		action: 'Get custom field group dependencies',
 	},
 	{
 		name: 'Delete Group',
 		value: 'deleteGroup',
-		description: 'Delete a custom field group. Requires Admin.',
+		description: 'Delete a custom field group. Requires Custom Fields Update.',
 		action: 'Delete a custom field group',
 	},
 	{
@@ -113,37 +121,45 @@ export const CUSTOM_FIELD_OPERATION_OPTIONS: INodePropertyOptions[] = [
 	{
 		name: 'Search Definitions',
 		value: 'searchDefinitions',
-		description: 'Search custom field definitions. Requires Admin.',
+		description: 'Search custom field definitions. Requires Custom Fields Update.',
 		action: 'Search custom field definitions',
 	},
 	{
 		name: 'Create Definition',
 		value: 'createDefinition',
-		description: 'Create a custom field definition. Requires Admin.',
+		description: 'Create a custom field definition. Requires Custom Fields Update.',
 		action: 'Create a custom field definition',
 	},
 	{
 		name: 'Update Definition',
 		value: 'updateDefinition',
-		description: 'Update a custom field definition except immutable fieldType. Requires Admin.',
+		description:
+			'Update a custom field definition except immutable fieldType. Requires Custom Fields Update.',
 		action: 'Update a custom field definition',
 	},
 	{
 		name: 'Bulk Update Definitions',
 		value: 'bulkUpdateDefinitions',
-		description: 'Bulk update custom field definition required state or group. Requires Admin.',
+		description:
+			'Bulk update custom field definition required state or group. Requires Custom Fields Update.',
 		action: 'Bulk update custom field definitions',
+	},
+	{
+		name: 'Get Definition Dependencies',
+		value: 'getDefinitionDependencies',
+		description: 'Read the definition version and dependency records for review before deletion',
+		action: 'Get custom field definition dependencies',
 	},
 	{
 		name: 'Delete Definition',
 		value: 'deleteDefinition',
-		description: 'Delete one custom field definition. Requires Admin.',
+		description: 'Delete one custom field definition. Requires Custom Fields Update.',
 		action: 'Delete a custom field definition',
 	},
 	{
 		name: 'Bulk Delete Definitions',
 		value: 'bulkDeleteDefinitions',
-		description: 'Delete multiple custom field definitions. Requires Admin.',
+		description: 'Delete multiple custom field definitions. Requires Custom Fields Update.',
 		action: 'Bulk delete custom field definitions',
 	},
 	{
@@ -447,12 +463,15 @@ export function sanitizeCustomFieldDefinitionBody(
 			'Custom field definition isRequired',
 			itemIndex,
 		),
-		defaultValue: optionalString(
-			context,
-			body.defaultValue,
-			'Custom field definition defaultValue',
-			itemIndex,
-		),
+		defaultValue:
+			body.defaultValue === null || body.defaultValue === ''
+				? body.defaultValue
+				: optionalString(
+						context,
+						body.defaultValue,
+						'Custom field definition defaultValue',
+						itemIndex,
+					),
 		options: definitionOptions(context, body.options, fieldType, operation === 'create', itemIndex),
 		entityTypes: entityTypes(context, body.entityTypes, operation === 'create', itemIndex),
 		groupId: optionalUuid(context, body.groupId, 'Custom field group ID', itemIndex),
@@ -616,6 +635,7 @@ export function parseCustomFieldValues(
 	value: unknown,
 	itemIndex: number,
 ): Array<{ fieldId: string; value: string | null }> {
+	const fieldIds = new Set<string>();
 	return parseJsonArray(context, value, 'Custom Field Values', itemIndex).map((entry) => {
 		if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
 			throw nodeError(context, 'Each custom field value must be an object.', itemIndex);
@@ -625,8 +645,18 @@ export function parseCustomFieldValues(
 			valueEntry.fieldType === undefined
 				? undefined
 				: requireFieldType(context, valueEntry.fieldType, itemIndex);
+		const fieldId = requireUuid(
+			context,
+			valueEntry.fieldId,
+			'Custom field definition ID',
+			itemIndex,
+		).toLowerCase();
+		if (fieldIds.has(fieldId)) {
+			throw nodeError(context, 'Custom field values contain a duplicate definition ID.', itemIndex);
+		}
+		fieldIds.add(fieldId);
 		return {
-			fieldId: requireUuid(context, valueEntry.fieldId, 'Custom field definition ID', itemIndex),
+			fieldId,
 			value: serializeCustomFieldValue(context, fieldType, valueEntry.value, itemIndex),
 		};
 	});
@@ -657,25 +687,48 @@ export function customFieldBatchBody(
 export function extractAttachedCustomFieldValues(
 	value: unknown,
 ): Array<{ fieldId: string; value: string | null }> {
-	const container = value as IDataObject;
-	const rows = Array.isArray(value)
-		? value
-		: Array.isArray(container?.values)
-			? container.values
-			: Array.isArray(container?.data)
-				? container.data
-				: [];
+	const container =
+		value && typeof value === 'object' && !Array.isArray(value) ? (value as IDataObject) : null;
+	let rows: unknown = value;
+	if (!Array.isArray(value) && container && ('groups' in container || 'ungrouped' in container)) {
+		if (!Array.isArray(container.groups) || !Array.isArray(container.ungrouped)) {
+			throw new Error('Custom field values response has invalid groups.');
+		}
+		rows = [
+			...container.ungrouped,
+			...container.groups.flatMap((group) => {
+				if (!group || typeof group !== 'object' || !Array.isArray(group.fields)) {
+					throw new Error('Custom field values response has an invalid group.');
+				}
+				return group.fields;
+			}),
+		];
+	} else if (!Array.isArray(value)) {
+		rows = container?.values ?? container?.data;
+	}
+	if (!Array.isArray(rows)) {
+		throw new Error('Custom field values response must contain attached values.');
+	}
 
-	return rows
-		.filter((row): row is IDataObject => !!row && typeof row === 'object' && !Array.isArray(row))
-		.filter(
-			(row) =>
-				typeof row.fieldId === 'string' && Object.prototype.hasOwnProperty.call(row, 'value'),
-		)
-		.map((row) => ({
-			fieldId: row.fieldId as string,
-			value: row.value === null ? null : String(row.value),
-		}));
+	const fieldIds = new Set<string>();
+	return rows.map((row, index) => {
+		if (
+			!row ||
+			typeof row !== 'object' ||
+			Array.isArray(row) ||
+			typeof row.fieldId !== 'string' ||
+			row.fieldId === '' ||
+			(typeof row.value !== 'string' && row.value !== null) ||
+			fieldIds.has(row.fieldId.toLowerCase())
+		) {
+			throw new Error(
+				`Custom field values response has an invalid attached value at index ${index}.`,
+			);
+		}
+		const fieldId = row.fieldId.toLowerCase();
+		fieldIds.add(fieldId);
+		return { fieldId, value: row.value };
+	});
 }
 
 export function mergeCustomFieldValues(

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
 	ICredentialDataDecryptedObject,
 	ICredentialTestFunctions,
@@ -17,15 +18,17 @@ export type HustleOpsQueryParams = Record<string, string | number | boolean | nu
 type HustleOpsCredentials = {
 	baseUrl: string;
 	apiKey: string;
+	organizationId: string;
 	ignoreSslIssues?: boolean | string;
 };
 
 type PaginationOptions = {
+	method?: 'GET' | 'POST';
 	maxItems?: number;
 	maxPages?: number;
 };
 
-type HustleOpsApiClient = {
+export type HustleOpsApiClient = {
 	request: <T = IDataObject>(
 		method: HustleOpsHttpMethod,
 		path: string,
@@ -42,10 +45,11 @@ type HustleOpsApiClient = {
 
 export type PaginatedResponse = {
 	data: IDataObject[];
-	total: number;
 	page: number;
-	pageSize: number;
-	totalPages: number;
+	limit: number;
+	filteredCount?: number;
+	itemsTotal?: number;
+	totalPages?: number;
 };
 
 export const MAX_JSON_PARAMETER_CHARS = 100_000;
@@ -163,8 +167,14 @@ export function compactObject<T>(value: T): T {
 	return value;
 }
 
-function buildRequestId(itemIndex: number): string {
-	return `hustleops-n8n-${Date.now()}-${itemIndex}`;
+function organizationId(value: unknown): string {
+	if (
+		typeof value !== 'string' ||
+		!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.trim())
+	) {
+		throw new Error('Set a valid HustleOps Organization ID (UUIDv4) in the credential.');
+	}
+	return value.trim().toLowerCase();
 }
 
 function shouldIgnoreSslIssues(value: unknown): boolean {
@@ -224,19 +234,34 @@ export function redactSensitiveText(value: string): string {
 
 function formatApiError(error: unknown): string {
 	const body = getErrorBody(error);
-	const statusCode = body.statusCode;
-	const message = Array.isArray(body.message)
-		? body.message.join(', ')
-		: typeof body.message === 'string'
-			? body.message
-			: error instanceof Error
-				? error.message
-				: String(error);
+	const statusCode = body.statusCode ?? body.status;
+	const itemErrors = Array.isArray(body.failedItems)
+		? body.failedItems.flatMap((item) => {
+				if (!item || typeof item !== 'object' || !Array.isArray(item.errors)) return [];
+				return item.errors.flatMap((reason: unknown) => {
+					if (!reason || typeof reason !== 'object') return [];
+					const { code, message } = reason as IDataObject;
+					return [`[${item.index}] ${code ?? ''} ${message ?? ''}`.trim()];
+				});
+			})
+		: [];
+	const message = [
+		body.code,
+		body.title,
+		body.detail,
+		Array.isArray(body.message) ? body.message.join(', ') : body.message,
+		...itemErrors,
+	]
+		.filter((value): value is string => typeof value === 'string' && value !== '')
+		.join(' ');
 	const requestId = typeof body.requestId === 'string' ? ` requestId=${body.requestId}` : '';
 	const path = typeof body.path === 'string' ? ` path=${redactUrlQuery(body.path)}` : '';
 	const status = typeof statusCode === 'number' ? ` ${statusCode}` : '';
+	const fallback = error instanceof Error ? error.message : String(error);
 
-	return redactSensitiveText(`HustleOps API error${status}: ${message}${requestId}${path}`);
+	return redactSensitiveText(
+		`HustleOps API error${status}: ${message || fallback}${requestId}${path}`,
+	);
 }
 
 export function assertPaginatedResponse(value: unknown, label: string): PaginatedResponse {
@@ -249,14 +274,38 @@ export function assertPaginatedResponse(value: unknown, label: string): Paginate
 		throw new Error(`${label} must include a data array.`);
 	}
 
-	for (const field of ['total', 'page', 'pageSize', 'totalPages'] as const) {
-		const minimum = field === 'total' || field === 'totalPages' ? 0 : 1;
-		if (!Number.isInteger(response[field]) || (response[field] as number) < minimum) {
-			throw new Error(`${label} must include integer ${field}.`);
+	for (const field of ['page', 'limit', 'filteredCount', 'itemsTotal', 'totalPages'] as const) {
+		const required = field === 'page' || field === 'limit';
+		const number = response[field];
+		if (
+			(required || number !== undefined) &&
+			(typeof number !== 'number' || !Number.isSafeInteger(number) || number < (required ? 1 : 0))
+		) {
+			throw new Error(`${label} must include a valid integer ${field}.`);
 		}
 	}
 
 	return response as PaginatedResponse;
+}
+
+export function collectionQueryParams(body: IDataObject): HustleOpsQueryParams {
+	return {
+		page: body.page as number | undefined,
+		limit: body.limit as number | undefined,
+		sort: body.sort as string | undefined,
+		fields: Array.isArray(body.fields)
+			? body.fields.join(',')
+			: (body.fields as string | undefined),
+		include: Array.isArray(body.include) ? body.include.join(',') : undefined,
+		filter: body.filter === undefined ? undefined : JSON.stringify(body.filter),
+	};
+}
+
+export function expectedVersion(value: unknown): number {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 2147483647) {
+		throw new Error('Expected Version must be an integer between 0 and 2147483647.');
+	}
+	return value;
 }
 
 export function parsePositiveInteger(
@@ -384,11 +433,12 @@ export async function testHustleOpsApiCredentials(
 	try {
 		await request.call(helpers, {
 			method: 'GET',
-			url: `${baseUrl}/tags`,
+			url: `${baseUrl}/tags/auxiliary/list?limit=1`,
 			headers: {
 				[HUSTLEOPS_API_KEY_HEADER]: apiKey,
 				Accept: 'application/json',
-				'x-request-id': buildRequestId(0),
+				'x-request-id': randomUUID(),
+				'X-Organization-Id': organizationId(credentialData.organizationId),
 			},
 			json: true,
 			...(ignoreSslIssues && usesHttpRequest ? { skipSslCertificateValidation: true } : {}),
@@ -406,6 +456,7 @@ export async function createHustleOpsApiClient(
 	const credentials = (await context.getCredentials('hustleOpsApi')) as HustleOpsCredentials;
 	const baseUrl = normalizeBaseUrl(credentials.baseUrl);
 	const ignoreSslIssues = shouldIgnoreSslIssues(credentials.ignoreSslIssues);
+	const organization = organizationId(credentials.organizationId);
 
 	function buildRequestUrl(path: string, query?: HustleOpsQueryParams): string {
 		const url = new URL(`${baseUrl}${path}`);
@@ -434,7 +485,8 @@ export async function createHustleOpsApiClient(
 				headers: {
 					[HUSTLEOPS_API_KEY_HEADER]: credentials.apiKey,
 					Accept: 'application/json',
-					'x-request-id': buildRequestId(itemIndex),
+					'x-request-id': randomUUID(),
+					'X-Organization-Id': organization,
 					...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
 				},
 				body: hasJsonBody ? compactObject(body) : undefined,
@@ -452,44 +504,32 @@ export async function createHustleOpsApiClient(
 		options: PaginationOptions,
 		onRow: (row: IDataObject) => void,
 	): Promise<void> => {
-		const firstPagination = (initialBody.pagination ?? {}) as IDataObject;
-		const pageSize = typeof firstPagination.pageSize === 'number' ? firstPagination.pageSize : 25;
-		const maxItems = options.maxItems ?? Number.POSITIVE_INFINITY;
-		const maxPages = options.maxPages ?? Number.POSITIVE_INFINITY;
+		const method = options.method ?? 'POST';
+		const maxItems = options.maxItems ?? Infinity;
+		const maxPages = options.maxPages ?? Infinity;
 		let emitted = 0;
-		let pagesFetched = 0;
-		let page = typeof firstPagination.page === 'number' ? firstPagination.page : 1;
-		let totalPages = 1;
-
-		do {
-			if (emitted >= maxItems) {
-				return;
-			}
-
-			const response = assertPaginatedResponse(
-				await request<PaginatedResponse>('POST', path, {
-					...initialBody,
-					pagination: {
-						...firstPagination,
-						page,
-						pageSize,
-					},
-				}),
+		const firstPage = typeof initialBody.page === 'number' ? initialBody.page : 1;
+		for (
+			let page = firstPage;
+			page <= 10000 && page - firstPage < maxPages && emitted < maxItems;
+			page++
+		) {
+			const body = { ...initialBody, page, include: ['filteredCount'] };
+			const result = assertPaginatedResponse(
+				method === 'GET'
+					? await request('GET', path, undefined, collectionQueryParams(body))
+					: await request('POST', path, body),
 				`${path} paginated response`,
 			);
-
-			for (const row of response.data) {
-				if (emitted >= maxItems) {
-					return;
-				}
-				onRow(row);
-				emitted += 1;
+			if (result.page !== page || result.totalPages === undefined) {
+				throw new Error(`${path} response is missing the requested pagination metadata.`);
 			}
-
-			totalPages = response.totalPages;
-			page += 1;
-			pagesFetched += 1;
-		} while (page <= totalPages && pagesFetched < maxPages);
+			for (const row of result.data.slice(0, maxItems - emitted)) {
+				onRow(row);
+				emitted++;
+			}
+			if (result.data.length === 0 || page >= result.totalPages) return;
+		}
 	};
 
 	return { request, requestEachPage };

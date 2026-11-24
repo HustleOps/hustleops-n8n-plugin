@@ -35,6 +35,10 @@ test('HustleOps API credentials expose connection fields', () => {
 	assert.equal(baseUrl.required, true);
 	assert.match(baseUrl.description, /HTTPS HustleOps instance URL/);
 
+	assert.equal(
+		credentials.properties.find((field) => field.name === 'organizationId').required,
+		true,
+	);
 	assert.equal(apiKey.displayName, 'API Key');
 	assert.equal(apiKey.type, 'string');
 	assert.equal(apiKey.required, true);
@@ -53,6 +57,7 @@ test('HustleOps API credentials expose connection fields', () => {
 		properties: {
 			headers: {
 				[HUSTLEOPS_API_KEY_HEADER]: '={{$credentials.apiKey}}',
+				'X-Organization-Id': '={{$credentials.organizationId}}',
 			},
 		},
 	});
@@ -100,7 +105,7 @@ test('HustleOps node exposes the incident-response resources', () => {
 	]);
 	assert.deepEqual(
 		resource.options.map((option) => option.value),
-		['alert', 'incident', 'observable', 'knowledge', 'comment', 'tag', 'customField'],
+		['alert', 'incident', 'observable', 'knowledge', 'tag', 'customField'],
 	);
 });
 
@@ -152,13 +157,7 @@ test('HustleOps node exposes live request fields', () => {
 	assert.equal(notice, undefined);
 
 	assert.equal(id.required, true);
-	assert.deepEqual(id.displayOptions.show.operation, [
-		'get',
-		'update',
-		'setTags',
-		'addTags',
-		'removeTag',
-	]);
+	assert.deepEqual(id.displayOptions.show.operation, ['get', 'setTags', 'addTags', 'removeTag']);
 
 	assert.equal(returnAll.type, 'boolean');
 	assert.equal(returnAll.default, false);
@@ -189,7 +188,6 @@ test('HustleOps node exposes payload input mode for every payload operation', ()
 		'incident',
 		'observable',
 		'knowledge',
-		'comment',
 		'tag',
 		'customField',
 	]);
@@ -203,7 +201,6 @@ test('HustleOps node exposes payload input mode for every payload operation', ()
 		'update',
 		'setTags',
 		'addTags',
-		'toggleReaction',
 		'updateColor',
 		'bulkUpdateColor',
 		'bulkDelete',
@@ -242,10 +239,6 @@ test('HustleOps node exposes JSON object payload fields behind JSON Object mode'
 		description,
 		payloadJsonObjectParameterName('alert', 'create'),
 	);
-	const commentCreateJson = getProperty(
-		description,
-		payloadJsonObjectParameterName('comment', 'create'),
-	);
 	const customFieldBatchJson = getProperty(
 		description,
 		payloadJsonObjectParameterName('customField', 'batchGetValues'),
@@ -262,7 +255,7 @@ test('HustleOps node exposes JSON object payload fields behind JSON Object mode'
 		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
 	]);
 
-	for (const property of [alertCreateJson, commentCreateJson, customFieldBatchJson]) {
+	for (const property of [alertCreateJson, customFieldBatchJson]) {
 		assert.equal(property.type, 'json');
 		assert.equal(property.default, '{}');
 		assert.deepEqual(property.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
@@ -328,7 +321,7 @@ test('HustleOps node exposes structured core create and update fields', () => {
 		assert.equal(updateFields.type, 'collection');
 		assert.deepEqual(
 			updateFields.options.map((option) => option.name),
-			definition.updateFields,
+			definition.updateFields.filter((field) => field !== 'version'),
 		);
 	}
 
@@ -475,15 +468,22 @@ test('HustleOps picklist loaders map API values and readable labels', async () =
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async (options) => {
 				calls.push(options);
-				return [
-					{ id: 'ignore-id', value: 'authentication', label: 'Authentication' },
-					{ value: 'endpoint' },
-					{ label: 'Missing value' },
-				];
+				return {
+					data: [
+						{ id: 'ignore-id', value: 'authentication', label: 'Authentication' },
+						{ value: 'endpoint' },
+						{ label: 'Missing value' },
+					],
+					limit: 100,
+					page: 1,
+					filteredCount: 3,
+					totalPages: 1,
+				};
 			},
 		},
 	};
@@ -492,7 +492,12 @@ test('HustleOps picklist loaders map API values and readable labels', async () =
 
 	assert.equal(calls.length, 1);
 	assert.equal(calls[0].method, 'GET');
-	assert.equal(calls[0].url, 'https://hustleops.example.com/api/v1/picklists/alertType');
+	const url = new URL(calls[0].url);
+	assert.equal(url.pathname, '/api/v1/picklists/auxiliary/list');
+	assert.equal(url.searchParams.get('sort'), 'sortOrder');
+	assert.deepEqual(JSON.parse(url.searchParams.get('filter')).expression.groups[0].conditions, [
+		{ field: 'domain', operator: 'eq', value: 'alertType' },
+	]);
 	assert.deepEqual(options, [
 		{ name: 'Authentication', value: 'authentication', description: undefined },
 		{ name: 'Endpoint', value: 'endpoint', description: undefined },
@@ -507,12 +512,19 @@ test('HustleOps enum picklist loaders return API enum values for observable fiel
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
-			httpRequest: async () => [
-				{ value: 'malicious', label: 'Malicious' },
-				{ value: 'suspicious', label: 'Suspicious' },
-			],
+			httpRequest: async () => ({
+				data: [
+					{ value: 'malicious', label: 'Malicious' },
+					{ value: 'suspicious', label: 'Suspicious' },
+				],
+				page: 1,
+				limit: 100,
+				filteredCount: 2,
+				totalPages: 1,
+			}),
 		},
 	};
 
@@ -536,6 +548,7 @@ test('HustleOps picklist loader surfaces API failures clearly', async () => {
 		getCredentials: async () => ({
 			baseUrl: 'https://hustleops.example.com',
 			apiKey: 'fixture-api-key',
+			organizationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 		}),
 		helpers: {
 			httpRequest: async () => {
@@ -545,7 +558,7 @@ test('HustleOps picklist loader surfaces API failures clearly', async () => {
 					body: {
 						statusCode: 403,
 						message: 'Forbidden',
-						path: '/api/v1/picklists/alertType',
+						path: '/api/v1/picklists/auxiliary/list',
 						requestId: 'req-picklist',
 					},
 				};
@@ -556,97 +569,8 @@ test('HustleOps picklist loader surfaces API failures clearly', async () => {
 
 	await assert.rejects(
 		node.methods.loadOptions.getAlertTypeOptions.call(context),
-		/HustleOps API error 403.*Forbidden.*req-picklist.*\/api\/v1\/picklists\/alertType/,
+		/HustleOps API error 403.*Forbidden.*req-picklist.*\/api\/v1\/picklists\/auxiliary\/list/,
 	);
-});
-
-test('HustleOps node exposes comment operations and fields', () => {
-	const description = getNodeDescription();
-	const operationProperties = description.properties.filter(
-		(candidate) => candidate.name === 'operation',
-	);
-	const commentOperation = operationProperties.find((candidate) =>
-		candidate.displayOptions?.show?.resource?.includes('comment'),
-	);
-
-	assert.ok(commentOperation, 'Expected comment operation selector');
-	assert.deepEqual(
-		commentOperation.options.map((option) => option.value),
-		[
-			'list',
-			'search',
-			'unreadCount',
-			'create',
-			'markRead',
-			'update',
-			'delete',
-			'toggleReaction',
-			'togglePin',
-		],
-	);
-
-	const entityType = getProperty(description, 'entityType');
-	const entityId = getProperty(description, 'entityId');
-	const commentId = getProperty(description, 'commentId');
-	const take = getProperty(description, 'take');
-	const cursor = getProperty(description, 'cursor');
-	const q = getProperty(description, 'q');
-	const maxResults = getProperty(description, 'maxResults');
-	const commentContent = getProperty(description, 'payloadCommentContent');
-	const commentAttachmentIds = getProperty(description, 'payloadCommentAttachmentIds');
-	const commentEmoji = getProperty(description, 'payloadCommentEmoji');
-	const includeCommentPaginationMetadata = getProperty(
-		description,
-		'includeCommentPaginationMetadata',
-	);
-	const coreOperation = operationProperties.find((candidate) =>
-		candidate.displayOptions?.show?.resource?.includes('incident'),
-	);
-	const coreResourceValues = ['alert', 'incident', 'observable', 'knowledge'];
-
-	assert.ok(coreOperation, 'Expected core operation selector');
-	assert.deepEqual(coreOperation.displayOptions.show.resource, coreResourceValues);
-	assert.deepEqual(entityType.displayOptions.show.resource, ['comment', 'customField']);
-	assert.deepEqual(entityId.displayOptions.show.resource, ['comment', 'customField']);
-	assert.deepEqual(commentId.displayOptions.show.operation, [
-		'update',
-		'delete',
-		'toggleReaction',
-		'togglePin',
-	]);
-	assert.equal(take.default, 50);
-	assert.equal(take.typeOptions.minValue, 1);
-	assert.equal(take.typeOptions.maxValue, 100);
-	assert.deepEqual(cursor.displayOptions.show.operation, ['list']);
-	assert.deepEqual(q.displayOptions.show.operation, ['search']);
-	assert.equal(maxResults.default, 100);
-	assert.equal(maxResults.typeOptions.minValue, 1);
-	assert.equal(maxResults.typeOptions.maxValue, 100);
-	assert.deepEqual(maxResults.displayOptions.show.operation, ['search']);
-	assert.equal(commentContent.type, 'string');
-	assert.deepEqual(commentContent.displayOptions.show.operation, ['create', 'update']);
-	assert.deepEqual(commentContent.displayOptions.show[PAYLOAD_INPUT_MODE_PARAMETER], [
-		PAYLOAD_MODE_INDIVIDUAL_FIELDS,
-	]);
-	assert.equal(commentAttachmentIds.type, 'json');
-	assert.deepEqual(commentAttachmentIds.displayOptions.show.operation, ['create']);
-	assert.equal(commentEmoji.type, 'string');
-	assert.deepEqual(commentEmoji.displayOptions.show.operation, ['toggleReaction']);
-	assert.deepEqual(includeCommentPaginationMetadata.displayOptions.show.operation, ['list']);
-
-	for (const coreFieldName of [
-		'id',
-		'returnAll',
-		'maxItems',
-		'maxPages',
-		'includePaginationMetadata',
-	]) {
-		assert.deepEqual(
-			getProperty(description, coreFieldName).displayOptions.show.resource,
-			coreResourceValues,
-			`Expected ${coreFieldName} to be hidden for Comment`,
-		);
-	}
 });
 
 test('HustleOps node exposes tag and custom field operations and fields', () => {
@@ -669,7 +593,16 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 	assert.ok(tagOperation, 'Expected tag operation selector');
 	assert.deepEqual(
 		tagOperation.options.map((option) => option.value),
-		['list', 'search', 'create', 'updateColor', 'bulkUpdateColor', 'delete', 'bulkDelete'],
+		[
+			'list',
+			'search',
+			'create',
+			'updateColor',
+			'bulkUpdateColor',
+			'getDeletionImpact',
+			'delete',
+			'bulkDelete',
+		],
 	);
 	assert.ok(customFieldOperation, 'Expected custom field operation selector');
 	assert.deepEqual(
@@ -678,12 +611,14 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 			'listGroups',
 			'createGroup',
 			'updateGroup',
+			'getGroupDependencies',
 			'deleteGroup',
 			'listDefinitions',
 			'searchDefinitions',
 			'createDefinition',
 			'updateDefinition',
 			'bulkUpdateDefinitions',
+			'getDefinitionDependencies',
 			'deleteDefinition',
 			'bulkDeleteDefinitions',
 			'getValues',
@@ -700,7 +635,7 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 
 	const tagValue = getProperty(description, 'payloadTagValue');
 	const tagColor = getProperty(description, 'payloadTagColor');
-	const tagIds = getProperty(description, 'payloadTagIds');
+	const tagIds = getProperty(description, 'payloadTagItems');
 	const tagForce = getProperty(description, 'payloadTagForce');
 	const entityTagValues = getProperty(description, 'payloadEntityTagValues');
 	const tagId = getProperty(description, 'tagId');
@@ -710,11 +645,7 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 		description,
 		'payloadCustomFieldDefinitionFields',
 	);
-	const customFieldDefinitionBulkFields = getProperty(
-		description,
-		'payloadCustomFieldDefinitionBulkFields',
-	);
-	const customFieldDefinitionIds = getProperty(description, 'payloadCustomFieldDefinitionIds');
+	const customFieldDefinitionBulkFields = getProperty(description, 'payloadCustomFieldItems');
 	const customFieldDefinitionForce = getProperty(description, 'payloadCustomFieldDefinitionForce');
 	const customFieldPayloadRows = getProperty(description, 'payloadCustomFieldValues');
 	const customFieldGroupId = getProperty(description, 'customFieldGroupId');
@@ -729,17 +660,18 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 	assert.equal(tagValue.type, 'string');
 	assert.deepEqual(tagValue.displayOptions.show.operation, ['create']);
 	assert.equal(tagColor.type, 'color');
-	assert.deepEqual(tagColor.displayOptions.show.operation, [
-		'create',
-		'updateColor',
-		'bulkUpdateColor',
-	]);
+	assert.deepEqual(tagColor.displayOptions.show.operation, ['create', 'updateColor']);
 	assert.equal(tagIds.type, 'json');
 	assert.deepEqual(tagIds.displayOptions.show.operation, ['bulkUpdateColor', 'bulkDelete']);
 	assert.equal(tagForce.type, 'boolean');
 	assert.deepEqual(tagForce.displayOptions.show.operation, ['bulkDelete']);
 	assert.equal(tagId.type, 'options');
-	assert.deepEqual(tagId.displayOptions.show.operation, ['updateColor', 'delete', 'removeTag']);
+	assert.deepEqual(tagId.displayOptions.show.operation, [
+		'updateColor',
+		'delete',
+		'getDeletionImpact',
+		'removeTag',
+	]);
 	assert.deepEqual(force.displayOptions.show.operation, [
 		'delete',
 		'deleteGroup',
@@ -759,9 +691,6 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 	assert.equal(customFieldDefinitionBulkFields.type, 'json');
 	assert.deepEqual(customFieldDefinitionBulkFields.displayOptions.show.operation, [
 		'bulkUpdateDefinitions',
-	]);
-	assert.equal(customFieldDefinitionIds.type, 'json');
-	assert.deepEqual(customFieldDefinitionIds.displayOptions.show.operation, [
 		'bulkDeleteDefinitions',
 	]);
 	assert.equal(customFieldDefinitionForce.type, 'boolean');
@@ -779,11 +708,13 @@ test('HustleOps node exposes tag and custom field operations and fields', () => 
 	assert.deepEqual(customFieldGroupId.displayOptions.show.operation, [
 		'updateGroup',
 		'deleteGroup',
+		'getGroupDependencies',
 	]);
 	assert.equal(customFieldDefinitionId.type, 'options');
 	assert.deepEqual(customFieldDefinitionId.displayOptions.show.operation, [
 		'updateDefinition',
 		'deleteDefinition',
+		'getDefinitionDependencies',
 	]);
 	assert.deepEqual(entityIds.displayOptions.show.operation, ['batchGetValues']);
 	assert.equal(typeof node.methods.loadOptions.getTagOptions, 'function');
@@ -1006,7 +937,6 @@ test('runtime package surface stays compatible with verified community node cons
 	const runtimeSources = [
 		'nodes/HustleOps/HustleOps.node.ts',
 		'nodes/HustleOps/GenericFunctions.ts',
-		'nodes/HustleOps/commentDefinitions.ts',
 		'nodes/HustleOps/customFieldDefinitions.ts',
 		'nodes/HustleOps/resourceDefinitions.ts',
 		'nodes/HustleOps/structuredCoreFields.ts',

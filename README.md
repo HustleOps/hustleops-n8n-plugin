@@ -1,117 +1,79 @@
 # HustleOps n8n Community Node
 
-This package provides an n8n community node for HustleOps incident response workflows.
+Use this community node to read and update HustleOps incident response records in n8n.
 
-The current package supports live HustleOps API requests for core alert, incident, observable, knowledge, comment, tag, and custom field operations.
-
-## Supported Resources And Operations
-
-| Resource     | Operations                                                                                                                                                                                                                                                                                         |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Alert        | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
-| Incident     | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
-| Observable   | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
-| Knowledge    | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                 |
-| Comment      | List, Search, Get Unread Count, Create, Mark Read, Update, Delete, Toggle Reaction, Toggle Pin                                                                                                                                                                                                     |
-| Tag          | List, Search, Create, Update Color, Bulk Update Color, Delete, Bulk Delete                                                                                                                                                                                                                         |
-| Custom Field | List Groups, Create Group, Update Group, Delete Group, List Definitions, Search Definitions, Create Definition, Update Definition, Bulk Update Definitions, Delete Definition, Bulk Delete Definitions, Get Values, Get Available, Batch Get Values, Replace Values, Update Selected Values Safely |
-
-Payload operations expose an **Input Mode** selector.
-
-- **Individual Fields** is the default. The node builds the request body from visible fields and validates the body before it reads credentials or calls HustleOps.
-- **JSON Object** submits the JSON object as the complete request body. JSON Object mode is full replacement: values left in hidden Individual Fields controls are ignored.
-
-Structured enum fields render as dropdowns. Picklist-backed fields such as alert type/status, incident status/category, observable type/threat level/criticality, and knowledge type load their dropdown options from HustleOps `/picklists/:domain` endpoints and send the selected API value in the create or update payload.
-
-Use `Additional JSON` only for advanced supported fields or intentional overrides. `Additional JSON` is merged after structured fields, so duplicate keys in `Additional JSON` win. Unsupported fields still fail before the API request is sent.
-
-Core search paths are `/alerts/search`, `/incidents/search`, `/observables/search`, and `/knowledge/search`. Enable `Return All` to fetch pages until the API response reaches `totalPages`, `Max Items`, or `Max Pages`.
-
-Required create fields appear as normal n8n fields in Individual Fields mode. Optional create fields are available under `Additional Fields`, and update payload fields are available under `Fields to Update`. Unsupported fields still fail before the API request is sent.
-
-## Tag Operations
-
-Core resources expose `Set Tags`, `Add Tags`, and `Remove Tag` operations directly under Alert, Incident, Observable, and Knowledge.
-
-- `Set Tags`: calls `PUT /<resource>/:id/tags` with `{ "values": [...] }`. An empty array clears all tags.
-- `Add Tags`: calls `POST /<resource>/:id/tags` and requires at least one value.
-- `Remove Tag`: calls `DELETE /<resource>/:id/tags/:tagId`.
-
-Tag values are validated before the API request is sent: at most 20 tags per entity, at most 30 characters per tag, and only letters, numbers, spaces, and `* ! @ # $ : . - _ =`.
-
-The `Tag` resource covers admin tag management:
-
-- `List`: calls `GET /tags`, with optional `withCounts=true` for admin-only counts.
-- `Search`: calls `POST /tags/search` with a SearchRequest body.
-- `Create`: calls `POST /tags` with `{ "value": "vip", "color": "#0EA5E9" }`.
-- `Update Color`: calls `PATCH /tags/:id` with `{ "color": "#A855F7" }`. Tag values are immutable.
-- `Bulk Update Color`: calls `PATCH /tags/bulk` with `{ "ids": [...], "color": "#22C55E" }`.
-- `Delete`: calls `DELETE /tags/:id?force=true` when Force is enabled.
-- `Bulk Delete`: calls `POST /tags/bulk-delete` with `{ "ids": [...], "force": true }`.
-
-Tag payload operations support **Input Mode**. In **Individual Fields** mode, use fields such as `Tag Value`, `Tag Color`, `Tag IDs`, and `Force`. In **JSON Object** mode, submit the complete tag payload, for example:
-
-```json
-{
-	"ids": ["11111111-1111-4111-8111-111111111111"],
-	"force": true
-}
-```
-
-## Custom Field Operations
-
-The `Custom Field` resource covers custom field groups, definitions, and values.
-
-Group operations call `/custom-fields/groups`. Definition operations call `/custom-fields/definitions`, `/custom-fields/definitions/search`, `/custom-fields/definitions/bulk`, and `/custom-fields/definitions/bulk-delete`. Definition update rejects `fieldType` because field type is immutable.
-
-Value operations use uppercase entity types: `ALERT`, `INCIDENT`, `OBSERVABLE`, and `KNOWLEDGE`.
-
-- `Get Values`: calls `GET /custom-fields/values/:entityType/:entityId`.
-- `Get Available`: calls `GET /custom-fields/available/:entityType/:entityId`.
-- `Batch Get Values`: calls `POST /custom-fields/values/batch` with `{ "entityType": "ALERT", "entityIds": [...] }` and allows up to 100 IDs.
-- `Replace Values`: calls `PATCH /custom-fields/values/:entityType/:entityId` with the exact attached field set to keep.
-- `Update Selected Values Safely`: first reads existing values, merges selected field changes, then patches the complete attached field set so omitted attached fields are preserved.
-
-Custom field write operations support **Input Mode**. In **Individual Fields** mode, use the visible group, definition, definition ID, entity ID list, or attached field row controls for the selected operation. In **JSON Object** mode, submit the complete payload, for example:
-
-```json
-{
-	"entityType": "INCIDENT",
-	"entityIds": ["22222222-2222-4222-8222-222222222222"]
-}
-```
-
-Custom field values sent to the API are strings or `null`. `MULTI_SELECT` array inputs are serialized with `JSON.stringify`, so `["a", "b"]` is sent as `"[\"a\",\"b\"]"`. BOOLEAN values must be `"true"` or `"false"`; NUMBER, DATE, and URL values are validated before sending.
-
-## Getting an API Key
-
-API keys must be created outside n8n by a HustleOps administrator or another user with access to API-key management.
-
-The n8n node does not create, rotate, or revoke HustleOps API keys.
-
-The API key owner needs the HustleOps permissions required by the operation being run, such as view permission for Search/Get and create or update permission for write operations.
+| Resource                               | Operations                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Alert, Incident, Observable, Knowledge | Search, Count, Get, Create, Update, Set Tags, Add Tags, Remove Tag                                                                                                                                                                                                                                                                                      |
+| Tag                                    | List, Search, Create, Update Color, Bulk Update Color, Get Deletion Impact, Delete, Bulk Delete                                                                                                                                                                                                                                                         |
+| Custom Field                           | List Groups, Create Group, Update Group, Get Group Dependencies, Delete Group, List Definitions, Search Definitions, Create Definition, Update Definition, Bulk Update Definitions, Get Definition Dependencies, Delete Definition, Bulk Delete Definitions, Get Values, Get Available, Batch Get Values, Replace Values, Update Selected Values Safely |
 
 ## Authentication
 
-Create a `HustleOps API` credential in n8n with:
+Create a **HustleOps API** credential in n8n and enter the **Base URL**, **Organization ID** and **API Key**. The organization ID is the UUID of the organization the key can access. Create the key in HustleOps with the permissions needed by the workflow. Use HTTPS for deployed instances. HTTP is supported for local development on `localhost`, `127.0.0.1` and `::1`.
 
-- `Base URL`: the full HTTPS URL of your HustleOps instance. Use HTTP only for local development on `localhost`, `127.0.0.1`, or `::1`.
-- `API Key`: your HustleOps API key.
-- `Ignore SSL Issues`: disabled by default. Enable only for local or private test instances that use a self-signed certificate. For production, install a trusted certificate or add the issuing CA to the n8n/Node trust store.
+The node sends `x-api-key` and `X-Organization-Id` on scoped requests. The credential check uses the operational tag catalog, so testing the connection requires no tag administration grant.
 
-Requests send:
+## Search and count
 
-```text
-x-api-key: ho_sk_...
-Accept: application/json
-Content-Type: application/json
+Core Search sends `POST /<resource>/search`. Tag Search and Custom Field Search Definitions use the `GET /tags` and `GET /custom-fields` collections. Results normally emit one item per row. A search JSON Object can contain `filter`, `fields`, `page`, `limit`, `sort` and `include`. For example, a core Search can send:
+
+```json
+{
+	"filter": {
+		"expression": {
+			"operator": "AND",
+			"groups": [
+				{
+					"operator": "AND",
+					"conditions": [{ "field": "severity", "operator": "eq", "value": "HIGH" }]
+				}
+			]
+		}
+	},
+	"page": 1,
+	"limit": 25,
+	"sort": "-createdAt"
+}
 ```
 
-API keys act as the user who owns the key, so role and permission checks still apply.
+**Include Pagination Metadata** returns the core search page with `data`, `page` and `limit` and requests `itemsTotal` and `filteredCount` unless you supplied your own `include`. When requested, `filteredCount` comes with `totalPages`. **Return All** fetches pages up to **Max Items** or **Max Pages**. **Count** requests a metadata-only search and returns `{ "count": number }` with the exact filtered count.
+
+Saved search parameters for page, page size and sort are translated. Rewrite nested filters that the new two-level expression cannot represent. Workflows using **Exclude IDs** need a revised filter because the collection contract removed that selector. For text search in the Tag and Custom Field collections, use `filter.query`.
+
+## Create and update
+
+**Individual Fields** builds the fields for one command item. Required create values appear as node parameters, optional values under **Additional Fields**, and update values under **Fields to Update**. Updates use **Expected Version** from the record you read. Picklist-backed fields load active values from `GET /picklists/auxiliary/list`.
+
+**JSON Object** accepts a flat field object for a single command. Core Create and Update also accept the native `{ "items": [...] }` envelope. Create items use `clientRequestId` and `data`. Update items use `id`, `expectedVersion` and `changes`. The node generates a correlation ID for single-item creates. A flat update JSON object can clear nullable fields, for example `{ "summary": null }`.
+
+Alert and Incident writes can require versioned relationship references. In Individual Fields mode, use **Command References** for those values. An Alert create with no linked incident sends `incident: null`. To change an Alert's detection time or linked incident, supply `currentIncident` as `{ "id": "...", "expectedVersion": 0 }` or `null` if currently unlinked. Use `destinationIncident` to change the link. For applicable assignee changes, supply `assigneeMembership` with the membership ID and version. With JSON Object mode, put those references on the command item alongside `data` or `changes`.
+
+The node emits the API command response. Read the success IDs and versions from the response, then use **Get** for a full record. Check the failed items in bulk responses because a command can report both successes and failures.
+
+## Tags
+
+**Set Tags**, **Add Tags** and **Remove Tag** use `POST /<resource>/tags/replace`, `/tags/add` and `/tags/remove`. Supply the owning record ID and expected version. Set Tags accepts an empty array to clear all tags. Add Tags requires at least one tag value. Remove Tag takes a tag ID.
+
+Tag administration uses `GET /tags` and the versioned commands `POST /tags`, `/tags/update` and `/tags/delete`. **With Counts** includes per-tag usage counts. **Bulk Update Color** takes items with `id`, `expectedVersion` and `changes.color`. To delete one tag, run **Get Deletion Impact**, review the result, and pass it to **Deletion Impact**. Bulk deletes require `id`, `expectedVersion`, `expectedUsageCounts` and `affectedRecords` per item. Set **Force** when you intend to unlink tags from the reviewed records.
+
+## Custom fields
+
+Definition administration uses `/custom-fields` and group administration uses `/custom-fields/groups`. Both use `POST /update` and `POST /delete` under their respective collection paths. A definition's field type is immutable. Bulk updates take items with `id`, `expectedVersion` and `changes`. For deletion, use the applicable **Get Dependencies** operation to get a version and the affected-record array. Supply that version and the reviewed array when deleting. Bulk definition delete items each require `affectedEntities`. An empty array is valid when the record has no dependencies.
+
+Value operations support `ALERT`, `INCIDENT`, `OBSERVABLE` and `KNOWLEDGE`. **Get Values** returns `{ id, version, values }` from `GET /<resource>/<id>/custom-fields`. **Get Available** also returns the applicable `definitions` read from the operational custom field catalog. **Batch Get Values** reads up to 100 IDs individually and returns their snapshots in `data` in input order.
+
+Both value update operations use `POST /<resource>/custom-fields/update`. **Replace Values** sends a complete set with the expected version you supply. Omitted optional attachments are removed and omitted required attachments are retained by HustleOps. **Update Selected Values Safely** reads the current values and version, merges the selected changes, and submits the version from that same read. A concurrent edit can cause a version conflict.
+
+Custom field values are strings or `null`. The node converts multi-select arrays to JSON strings. A value item contains `fieldId` and `value`.
+
+## Upgrading existing workflows
+
+Set **Organization ID** in each credential and supply **Expected Version** for versioned updates, tag changes and custom field replacements. Update downstream expressions that read a write response as a full record or depend on the old pagination fields. Bulk tag and definition writes require versioned command items. HustleOps removed the Comment endpoints, so saved Comment nodes report that the resource is unavailable.
 
 ## Create Examples
 
-With **Input Mode** set to **Individual Fields**, set these values through node fields. The JSON below shows the API payload produced from the structured fields.
+With **Input Mode** set to **Individual Fields**, set these values through node fields. The JSON below shows the data inside the generated create command item.
 
 Alert field values:
 
@@ -196,98 +158,5 @@ Knowledge field values:
 	"type": "runbook",
 	"tlp": "AMBER",
 	"description": "Steps for disabling compromised accounts"
-}
-```
-
-## Update Fields
-
-Update operations keep `ID` as a required field and put editable payload values under `Fields to Update` in **Individual Fields** mode.
-
-For example, updating an Observable can set `Threat Level`, `Criticality`, and `Version` under `Fields to Update`.
-
-To submit a complete update body or clear a supported nullable field, use **JSON Object** mode, such as `{ "summary": null }`. Blank Individual Fields update values are omitted.
-
-## Search Pagination
-
-By default, Search returns one output item per row in the API response `data` array.
-
-Enable `Include Pagination Metadata` to return the raw page object with `data`, `total`, `page`, `pageSize`, and `totalPages`.
-
-Enable `Return All` to fetch multiple pages. `Max Items` and `Max Pages` bound the request so large result sets do not run indefinitely.
-
-## Comment Operations
-
-Comment operations work against comment threads attached to core entities. Choose `Comment` as the resource, then choose one of:
-
-- `List`: calls `GET /comments` with `entityType`, `entityId`, optional `cursor`, and `take`.
-- `Search`: calls `GET /comments/search` with `entityType`, `entityId`, and `q`.
-- `Get Unread Count`: calls `GET /comments/unread-count` and returns `{ "unreadCount": number }`.
-- `Create`: calls `POST /comments` with content, parent ID, attachment IDs, or a complete JSON Object payload.
-- `Mark Read`: calls `POST /comments/read` with `entityType` and `entityId`.
-- `Update`: calls `PATCH /comments/:id` with `{ "content": "Updated containment note" }`.
-- `Delete`: calls `DELETE /comments/:id`.
-- `Toggle Reaction`: calls `POST /comments/:id/reactions` with `{ "emoji": "\u2705" }`.
-- `Toggle Pin`: calls `PATCH /comments/:id/pin`.
-
-Comment `entityType` must be one of `ALERT`, `INCIDENT`, `OBSERVABLE`, or `KNOWLEDGE`.
-
-List uses cursor pagination. `Take` defaults to `50` and must be between `1` and `100`. Enable `Include Cursor Metadata` to return the raw response containing `items` and `nextCursor` instead of one output item per comment.
-
-Search emits one item per comment and caps emitted rows with `Max Results`, which defaults to `100`.
-
-### n8n Fields and Outputs
-
-| Operation        | Required n8n fields                        | Optional n8n fields                                      | Output                                                                                                                        |
-| ---------------- | ------------------------------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| List             | `Entity Type`, `Entity ID`                 | `Take`, `Cursor`, `Include Cursor Metadata`              | One item per comment, or one raw response item with `items` and `nextCursor` when cursor metadata is enabled                  |
-| Search           | `Entity Type`, `Entity ID`, `Search Query` | `Max Results`                                            | One item per matching comment, up to `Max Results`                                                                            |
-| Get Unread Count | `Entity Type`, `Entity ID`                 | none                                                     | `{ "unreadCount": number }`                                                                                                   |
-| Create           | `Entity Type`, `Entity ID`, `Input Mode`   | `Content`, `Parent ID`, `Attachment IDs`, or JSON Object | Created comment plus `autoTransitioned`                                                                                       |
-| Mark Read        | `Entity Type`, `Entity ID`                 | none                                                     | `{ "success": true, "entityType": "INCIDENT", "entityId": "11111111-1111-4111-8111-111111111111" }`                           |
-| Update           | `Comment ID`, `Input Mode`                 | `Content` or JSON Object                                 | Updated comment                                                                                                               |
-| Delete           | `Comment ID`                               | none                                                     | `{ "id": "22222222-2222-4222-8222-222222222222", "entityType": "ALERT", "entityId": "11111111-1111-4111-8111-111111111111" }` |
-| Toggle Reaction  | `Comment ID`, `Input Mode`                 | `Emoji` or JSON Object                                   | Updated comment                                                                                                               |
-| Toggle Pin       | `Comment ID`                               | none                                                     | Updated comment                                                                                                               |
-
-### Comment Payload Examples
-
-Create comment in **Individual Fields** mode. Set `Entity Type`, `Entity ID`, and `Content` in the node fields. The request body is:
-
-```json
-{
-	"content": "Containment started"
-}
-```
-
-Create reply in **JSON Object** mode. Set `Entity Type` and `Entity ID` in the node fields, then submit this complete JSON Object:
-
-```json
-{
-	"content": "Adding timeline details",
-	"parentId": "22222222-2222-4222-8222-222222222222"
-}
-```
-
-Create comment with staged attachments in **JSON Object** mode. Set `Entity Type` and `Entity ID` in the node fields, then submit this complete JSON Object:
-
-```json
-{
-	"attachmentIds": ["33333333-3333-4333-8333-333333333333"]
-}
-```
-
-Update comment in **Individual Fields** mode by setting `Content`, or submit this complete JSON Object in **JSON Object** mode:
-
-```json
-{
-	"content": "Updated containment note"
-}
-```
-
-Toggle reaction in **Individual Fields** mode by setting `Emoji`, or submit this complete JSON Object in **JSON Object** mode:
-
-```json
-{
-	"emoji": "\u2705"
 }
 ```

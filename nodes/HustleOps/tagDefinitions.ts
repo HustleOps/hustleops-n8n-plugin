@@ -9,6 +9,7 @@ export type TagOperation =
 	| 'updateColor'
 	| 'bulkUpdateColor'
 	| 'delete'
+	| 'getDeletionImpact'
 	| 'bulkDelete';
 
 export type EntityTagOperation = 'setTags' | 'addTags' | 'removeTag';
@@ -24,6 +25,7 @@ const TAG_BODY_FIELDS_BY_OPERATION: Record<TagOperation, Set<string>> = {
 	updateColor: new Set(['color']),
 	bulkUpdateColor: new Set(['ids', 'color']),
 	delete: new Set(),
+	getDeletionImpact: new Set(),
 	bulkDelete: new Set(['ids', 'force']),
 };
 const MAX_TAGS_PER_ENTITY = 20;
@@ -49,43 +51,50 @@ export const TAG_OPERATION_OPTIONS: INodePropertyOptions[] = [
 	{
 		name: 'List',
 		value: 'list',
-		description: 'List tags, optionally including admin-only usage counts',
+		description: 'List tags with optional usage counts. Requires Tags View.',
 		action: 'List tags',
 	},
 	{
 		name: 'Search',
 		value: 'search',
-		description: 'Search tags with a SearchRequest body. Requires Admin.',
+		description: 'Search the tag collection. Requires Tags View.',
 		action: 'Search tags',
 	},
 	{
 		name: 'Create',
 		value: 'create',
-		description: 'Create a tag. Requires Admin.',
+		description: 'Create a tag. Requires Tags View and Update.',
 		action: 'Create a tag',
 	},
 	{
 		name: 'Update Color',
 		value: 'updateColor',
-		description: 'Update a tag color. Tag value is immutable. Requires Admin.',
+		description: 'Update a tag color. Tag value is immutable. Requires Tags View and Update.',
 		action: 'Update a tag color',
 	},
 	{
 		name: 'Bulk Update Color',
 		value: 'bulkUpdateColor',
-		description: 'Update color for multiple tags. Requires Admin.',
+		description: 'Update color for multiple tags. Requires Tags View and Update.',
 		action: 'Bulk update tag color',
+	},
+	{
+		name: 'Get Deletion Impact',
+		value: 'getDeletionImpact',
+		description:
+			'Read the tag version, usage counts, and affected records for review before deletion',
+		action: 'Get tag deletion impact',
 	},
 	{
 		name: 'Delete',
 		value: 'delete',
-		description: 'Delete one tag. Requires Admin.',
+		description: 'Delete one tag. Requires Tags View and Update.',
 		action: 'Delete a tag',
 	},
 	{
 		name: 'Bulk Delete',
 		value: 'bulkDelete',
-		description: 'Delete multiple tags. Requires Admin.',
+		description: 'Delete multiple tags. Requires Tags View and Update.',
 		action: 'Bulk delete tags',
 	},
 ];

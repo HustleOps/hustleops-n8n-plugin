@@ -43,7 +43,6 @@ export type SearchRequestDefinition = {
 	sortFields: readonly string[];
 };
 
-const SEARCH_REQUEST_FIELDS = new Set(['filter', 'pagination', 'excludeIds']);
 const SEARCH_PAGINATION_FIELDS = new Set(['page', 'pageSize', 'sortBy', 'sortOrder']);
 const SEARCH_OPERATORS = new Set([
 	'eq',
@@ -179,7 +178,6 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 			'alertRefUrl',
 			'status',
 			'detectedAt',
-			'incidentId',
 			'assigneeId',
 			'tags',
 		],
@@ -194,7 +192,6 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 			'alertRefUrl',
 			'status',
 			'detectedAt',
-			'incidentId',
 			'assigneeId',
 			'summary',
 			'version',
@@ -263,7 +260,6 @@ export const CORE_RESOURCE_DEFINITIONS: Record<CoreResource, CoreResourceDefinit
 				description: 'Must match an active alertStatus picklist value in HustleOps when provided.',
 			},
 			detectedAt: { name: 'detectedAt', type: 'date-time', requiredForCreate: true },
-			incidentId: { name: 'incidentId', type: 'uuid' },
 			assigneeId: { name: 'assigneeId', type: 'uuid' },
 			summary: { name: 'summary', type: 'string' },
 			version: { name: 'version', type: 'number' },
@@ -598,18 +594,6 @@ function assertAllowedKeys(
 	}
 }
 
-function validateExcludeIds(definition: SearchRequestDefinition, value: unknown): void {
-	if (value === undefined) {
-		return;
-	}
-	if (
-		!Array.isArray(value) ||
-		value.some((id) => typeof id !== 'string' || !UUID_PATTERN.test(id))
-	) {
-		throw new Error(`${definition.displayName} search excludeIds must contain valid UUIDs.`);
-	}
-}
-
 function validateSearchFilter(
 	definition: SearchRequestDefinition,
 	value: unknown,
@@ -707,56 +691,117 @@ function validateSearchFilter(
 	}
 }
 
-export function buildGenericSearchRequest(
+const COLLECTION_KEYS = new Set(['filter', 'fields', 'page', 'limit', 'sort', 'include']);
+
+function translateLegacyFilter(filter: IDataObject): IDataObject | undefined {
+	const groups: IDataObject[] = [];
+	const operator = filter.operator ?? 'AND';
+	function append(group: IDataObject) {
+		const conditions = (group.conditions ?? []) as IDataObject[];
+		const children = (group.groups ?? []) as IDataObject[];
+		const groupOperator = group.operator ?? 'AND';
+		if (children.length && groupOperator !== operator) {
+			throw new Error('Use collection filter.expression for this nested search filter.');
+		}
+		if (conditions.length) {
+			groups.push({
+				operator: groupOperator,
+				conditions: conditions.map(({ field, operator, value }) =>
+					compactObject({
+						field,
+						operator,
+						value: operator === 'isNull' || operator === 'isNotNull' ? undefined : value,
+					}),
+				),
+			});
+		}
+		children.forEach(append);
+	}
+	append(filter);
+	return groups.length ? { expression: { operator, groups } } : undefined;
+}
+
+export function buildCollectionRequest(
 	definition: SearchRequestDefinition,
 	input: IDataObject,
 ): IDataObject {
-	assertAllowedKeys(definition, 'search request', input, SEARCH_REQUEST_FIELDS);
-	const pagination = (input.pagination ?? {}) as IDataObject;
-	assertAllowedKeys(definition, 'search pagination', pagination, SEARCH_PAGINATION_FIELDS);
-	const sortBy =
-		typeof pagination.sortBy === 'string' && pagination.sortBy !== ''
-			? pagination.sortBy
-			: definition.defaultSortBy;
-	const sortOrder =
-		pagination.sortOrder === 'asc' || pagination.sortOrder === 'desc'
-			? pagination.sortOrder
-			: definition.defaultSortOrder;
-
-	if (!definition.sortFields.includes(sortBy)) {
-		throw new Error(`Unsupported ${definition.displayName} search sort field: ${sortBy}`);
+	const { filter, pagination, excludeIds, ...selectors } = input;
+	if (excludeIds !== undefined && (!Array.isArray(excludeIds) || excludeIds.length > 0)) {
+		throw new Error('HustleOps collection search no longer supports Exclude IDs.');
 	}
-	const page = typeof pagination.page === 'number' ? pagination.page : 1;
-	const pageSize = typeof pagination.pageSize === 'number' ? pagination.pageSize : 25;
-	if (!Number.isInteger(page) || page < 1 || page > MAX_PAGE) {
-		throw new Error(
-			`${definition.displayName} search pagination.page must be between 1 and ${MAX_PAGE}.`,
-		);
+	assertAllowedKeys(definition, 'collection request', selectors, COLLECTION_KEYS);
+	const filterObject = filter as IDataObject | undefined;
+	if (filter !== undefined && (!filter || typeof filter !== 'object' || Array.isArray(filter))) {
+		throw new Error('Collection filter must be an object.');
 	}
-	if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE) {
-		throw new Error(
-			`${definition.displayName} search pagination.pageSize must be between 1 and ${MAX_PAGE_SIZE}.`,
-		);
+	const legacyFilter =
+		filterObject && ['operator', 'conditions', 'groups'].some((key) => key in filterObject);
+	if (legacyFilter) validateSearchFilter(definition, filterObject);
+	const request = {
+		...selectors,
+		filter: legacyFilter ? translateLegacyFilter(filterObject) : filterObject,
+	};
+	if (pagination === undefined) return validateCollectionSelectors(request);
+	if (!pagination || typeof pagination !== 'object' || Array.isArray(pagination)) {
+		throw new Error('Search pagination must be an object.');
 	}
-
-	validateSearchFilter(definition, input.filter);
-	validateExcludeIds(definition, input.excludeIds);
-
-	return compactObject({
-		...input,
-		pagination: {
-			...pagination,
-			page,
-			pageSize,
-			sortBy,
-			sortOrder,
-		},
+	const options = pagination as IDataObject;
+	assertAllowedKeys(definition, 'search pagination', options, SEARCH_PAGINATION_FIELDS);
+	const { page, pageSize, sortBy, sortOrder } = options;
+	if (
+		(sortBy !== undefined && typeof sortBy !== 'string') ||
+		(sortOrder !== undefined && sortOrder !== 'asc' && sortOrder !== 'desc')
+	) {
+		throw new Error('Search sort needs a field and an asc or desc order.');
+	}
+	const sortField = sortBy || (sortOrder ? definition.defaultSortBy : undefined);
+	return validateCollectionSelectors({
+		...request,
+		page: selectors.page ?? page,
+		limit: selectors.limit ?? pageSize,
+		sort:
+			selectors.sort ??
+			(sortField
+				? `${(sortOrder ?? definition.defaultSortOrder) === 'desc' ? '-' : ''}${sortField}`
+				: undefined),
 	});
 }
 
-export function buildSearchRequest(
-	definition: CoreResourceDefinition,
-	input: IDataObject,
-): IDataObject {
-	return buildGenericSearchRequest(definition, input);
+function validateCollectionSelectors(request: IDataObject): IDataObject {
+	const { page, limit, sort, fields, include } = request;
+	if (
+		page !== undefined &&
+		(typeof page !== 'number' || !Number.isInteger(page) || page < 1 || page > MAX_PAGE)
+	) {
+		throw new Error(`Collection page must be an integer between 1 and ${MAX_PAGE}.`);
+	}
+	if (
+		limit !== undefined &&
+		(typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE)
+	) {
+		throw new Error(`Collection limit must be an integer between 1 and ${MAX_PAGE_SIZE}.`);
+	}
+	if (sort !== undefined && (typeof sort !== 'string' || sort.trim() === '')) {
+		throw new Error('Collection sort must be a field name. Prefix it with - for descending order.');
+	}
+	if (
+		fields !== undefined &&
+		fields !== 'all' &&
+		fields !== 'none' &&
+		(!Array.isArray(fields) ||
+			fields.length === 0 ||
+			fields.some((field) => typeof field !== 'string'))
+	) {
+		throw new Error('Collection fields must be all, none, or a nonempty list of field names.');
+	}
+	if (
+		include !== undefined &&
+		(!Array.isArray(include) ||
+			include.some((name) => name !== 'itemsTotal' && name !== 'filteredCount'))
+	) {
+		throw new Error(
+			'Collection include must be an array containing itemsTotal, filteredCount, or both.',
+		);
+	}
+	return compactObject(request);
 }
