@@ -123,11 +123,10 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: '22.14.0'
-          cache: 'npm'
-          registry-url: 'https://registry.npmjs.org/'
+          package-manager-cache: false
 
       - name: Install npm version for trusted publishing
-        run: npm install -g npm@11.5.1
+        run: npm install -g npm@11.20.0
 
       - name: Install dependencies
         run: npm ci
@@ -229,8 +228,8 @@ jobs:
           set -euo pipefail
           git fetch origin +refs/heads/main:refs/remotes/origin/main --tags
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-          if git rev-parse --verify "$RELEASE_TAG" >/dev/null 2>&1; then
-            test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$(git rev-parse HEAD)"
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            node scripts/ci/release-prepare.cjs --release-tag "$RELEASE_TAG" --require-prepared
           else
             git tag "$RELEASE_TAG"
             git push origin "$RELEASE_TAG"
@@ -250,14 +249,14 @@ jobs:
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             echo "GitHub Release $RELEASE_TAG already exists; reusing it for recovery."
           else
-            gh release create "$RELEASE_TAG" --draft --title "$RELEASE_TAG" --notes-file /tmp/release-notes.md --target "$(git rev-parse HEAD)"
+            gh release create "$RELEASE_TAG" --draft --verify-tag --title "$RELEASE_TAG" --notes-file /tmp/release-notes.md
           fi
 
       - name: Publish to npm
         if: steps.npm_version.outputs.published != 'true'
         env:
           RELEASE_MODE: 'true'
-        run: npm publish --registry=https://registry.npmjs.org/ --provenance
+        run: npm publish --registry=https://registry.npmjs.org/ --provenance --loglevel=verbose
 
       - name: Publish GitHub Release
         env:

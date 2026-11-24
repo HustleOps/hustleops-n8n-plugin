@@ -916,7 +916,10 @@ test('PR check workflow enforces pull request and release quality gates', () => 
 		releaseWorkflow,
 		/git fetch origin \+refs\/heads\/main:refs\/remotes\/origin\/main --tags/,
 	);
-	assert.match(releaseWorkflow, /gh release create "\$RELEASE_TAG" --draft/);
+	assert.match(releaseWorkflow, /gh release create "\$RELEASE_TAG" --draft --verify-tag/);
+	assert.match(releaseWorkflow, /npm install -g npm@11\.20\.0/);
+	assert.doesNotMatch(releaseWorkflow, /registry-url:/);
+	assert.match(releaseWorkflow, /package-manager-cache:\s*false/);
 	assert.match(
 		releaseWorkflow,
 		/npm publish --registry=https:\/\/registry\.npmjs\.org\/ --provenance/,
