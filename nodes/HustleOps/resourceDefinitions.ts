@@ -1,6 +1,6 @@
 import type { IDataObject, INode } from 'n8n-workflow';
 import { NodeOperationError } from 'n8n-workflow';
-import { compactObject } from './GenericFunctions';
+import { compactObject, isUuid } from './GenericFunctions';
 
 export type CoreResource = 'alert' | 'incident' | 'observable' | 'knowledge';
 export type DtoOperation = 'create' | 'update';
@@ -64,7 +64,6 @@ const MAX_SEARCH_CONDITIONS = 50;
 const MAX_SEARCH_DEPTH = 4;
 const MAX_PAGE = 10000;
 const MAX_PAGE_SIZE = 100;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ALERT_SOURCE_PATTERN = /^[a-zA-Z0-9:\-_]+$/;
 const SEVERITY_VALUES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const;
 const TLP_VALUES = ['RED', 'AMBER_STRICT', 'AMBER', 'GREEN', 'CLEAR'] as const;
@@ -463,6 +462,10 @@ export const CORE_RESOURCE_OPTIONS = Object.values(CORE_RESOURCE_DEFINITIONS).ma
 	description: definition.description,
 }));
 
+export function isFileObservableType(value: unknown): boolean {
+	return typeof value === 'string' && value.trim().toLowerCase() === 'file';
+}
+
 function assertSupportedFields(
 	definition: CoreResourceDefinition,
 	operationLabel: string,
@@ -482,13 +485,17 @@ function validateDtoField(definition: CoreResourceDefinition, field: string, val
 		return;
 	}
 
+	if (definition.resource === 'observable' && field === 'type' && isFileObservableType(value)) {
+		throw new Error('File observables require the HustleOps multipart upload endpoint.');
+	}
+
 	if (spec.type === 'string' && typeof value !== 'string') {
 		throw new Error(`${definition.displayName} field ${field} must be a string.`);
 	}
 	if (spec.type === 'number' && typeof value !== 'number') {
 		throw new Error(`${definition.displayName} field ${field} must be a number.`);
 	}
-	if (spec.type === 'uuid' && (typeof value !== 'string' || !UUID_PATTERN.test(value))) {
+	if (spec.type === 'uuid' && (!isUuid(value) || value !== value.trim())) {
 		throw new Error(`${definition.displayName} field ${field} must be a UUID.`);
 	}
 	if (spec.type === 'date-time' && (typeof value !== 'string' || Number.isNaN(Date.parse(value)))) {

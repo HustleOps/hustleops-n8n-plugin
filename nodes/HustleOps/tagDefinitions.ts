@@ -16,7 +16,7 @@ export type EntityTagOperation = 'setTags' | 'addTags' | 'removeTag';
 
 type ValidationContext = Pick<IExecuteFunctions, 'getNode'>;
 
-const TAG_VALUE_PATTERN = /^[\p{L}\p{N} *!@#$:._=-]+$/u;
+const TAG_VALUE_PATTERN = /^[a-zA-Z0-9 *!@#$:.\-_=]+$/;
 const TAG_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const TAG_BODY_FIELDS_BY_OPERATION: Record<TagOperation, Set<string>> = {
 	list: new Set(),
@@ -28,7 +28,7 @@ const TAG_BODY_FIELDS_BY_OPERATION: Record<TagOperation, Set<string>> = {
 	getDeletionImpact: new Set(),
 	bulkDelete: new Set(['ids', 'force']),
 };
-const MAX_TAGS_PER_ENTITY = 20;
+const MAX_TAGS_PER_ENTITY = 30;
 const MAX_TAG_VALUE_LENGTH = 30;
 const MAX_BULK_TAG_IDS = 100;
 
@@ -161,7 +161,7 @@ function tagValue(context: ValidationContext, value: unknown, itemIndex: number)
 	if (!TAG_VALUE_PATTERN.test(normalized)) {
 		throw nodeError(
 			context,
-			'Tag values may only contain letters, numbers, spaces, and * ! @ # $ : . - _ =.',
+			'Tag values may only contain ASCII letters, digits, spaces, and * ! @ # $ : . - _ =.',
 			itemIndex,
 		);
 	}

@@ -243,8 +243,9 @@ function optionalString(
 	value: unknown,
 	label: string,
 	itemIndex: number,
+	allowEmpty = false,
 ): string | undefined {
-	if (value === undefined || value === null || value === '') {
+	if (value === undefined || value === null || (!allowEmpty && value === '')) {
 		return undefined;
 	}
 	if (typeof value !== 'string') {
@@ -253,7 +254,7 @@ function optionalString(
 	return value;
 }
 
-function optionalNumber(
+function optionalSortOrder(
 	context: ValidationContext,
 	value: unknown,
 	label: string,
@@ -262,8 +263,8 @@ function optionalNumber(
 	if (value === undefined || value === null || value === '') {
 		return undefined;
 	}
-	if (typeof value !== 'number' || !Number.isFinite(value)) {
-		throw nodeError(context, `${label} must be a number.`, itemIndex);
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 2147483647) {
+		throw nodeError(context, `${label} must be an integer between 0 and 2147483647.`, itemIndex);
 	}
 	return value;
 }
@@ -417,8 +418,14 @@ export function sanitizeCustomFieldGroupBody(
 			body.description,
 			'Custom field group description',
 			itemIndex,
+			true,
 		),
-		sortOrder: optionalNumber(context, body.sortOrder, 'Custom field group sortOrder', itemIndex),
+		sortOrder: optionalSortOrder(
+			context,
+			body.sortOrder,
+			'Custom field group sortOrder',
+			itemIndex,
+		),
 	});
 	if (!required && Object.keys(sanitized).length === 0) {
 		throw nodeError(
@@ -455,6 +462,7 @@ export function sanitizeCustomFieldDefinitionBody(
 			body.description,
 			'Custom field definition description',
 			itemIndex,
+			true,
 		),
 		fieldType,
 		isRequired: optionalBoolean(
@@ -475,7 +483,7 @@ export function sanitizeCustomFieldDefinitionBody(
 		options: definitionOptions(context, body.options, fieldType, operation === 'create', itemIndex),
 		entityTypes: entityTypes(context, body.entityTypes, operation === 'create', itemIndex),
 		groupId: optionalUuid(context, body.groupId, 'Custom field group ID', itemIndex),
-		sortOrder: optionalNumber(
+		sortOrder: optionalSortOrder(
 			context,
 			body.sortOrder,
 			'Custom field definition sortOrder',
