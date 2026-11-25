@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.1 - 2026-11-25
+
+### Fixes
+
+- use the current HustleOps app icon (`ui`)
+- align request validation with HustleOps (`api`)
+
+### Documentation
+
+- map plugin operations to HustleOps API endpoints
+
+### CI
+
+- bind npm publishing to the production environment (`release`)
+- recover npm trusted publication without moving tags (`release`)
+
 ## v0.2.0 - 2026-11-24
 
 ### Features
