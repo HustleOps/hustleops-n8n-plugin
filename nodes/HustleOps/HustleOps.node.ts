@@ -49,6 +49,7 @@ import {
 	type FieldSpec,
 	buildCollectionRequest,
 	getCoreResourceDefinition,
+	isFileObservableType,
 	sanitizeDtoBody,
 } from './resourceDefinitions';
 import {
@@ -2183,7 +2184,8 @@ export class HustleOps implements INodeType {
 				return loadPicklistOptions(this, 'incidentCategory', 'Incident Category');
 			},
 			async getObservableTypeOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				return loadPicklistOptions(this, 'observableType', 'Observable Type');
+				const options = await loadPicklistOptions(this, 'observableType', 'Observable Type');
+				return options.filter((option) => !isFileObservableType(option.value));
 			},
 			async getThreatLevelOptions(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				return loadPicklistOptions(this, 'threatLevel', 'Threat Level', 'uppercase');

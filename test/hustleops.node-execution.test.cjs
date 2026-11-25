@@ -309,7 +309,7 @@ test('core JSON object mode validates tags before credentials are read', async (
 					severity: 'HIGH',
 					tlp: 'AMBER',
 					category: 'identity',
-					tags: Array.from({ length: 21 }, (_, index) => `tag-${index}`),
+					tags: Array.from({ length: 31 }, (_, index) => `tag-${index}`),
 				}),
 			},
 		],
@@ -328,7 +328,7 @@ test('core JSON object mode validates tags before credentials are read', async (
 	const node = new HustleOps();
 	await assert.rejects(
 		node.execute.call(context),
-		/Entity tags cannot contain more than 20 values/,
+		/Entity tags cannot contain more than 30 values/,
 	);
 	assert.equal(calls.length, 0);
 	assert.equal(getCredentialsCalled, false);
